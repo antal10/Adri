@@ -23,8 +23,17 @@ This repository is the canonical source of truth. There is no prior codebase to 
 
 ## Repo structure
 ```
-README.md              — high-level project overview
-CLAUDE.md              — this file (durable AI instructions)
+README.md                          — high-level project overview
+CLAUDE.md                          — this file (durable AI instructions)
+AGENTS.md                          — instructions for AI agents (Claude, Codex)
 docs/
-  adri_restart_brief.md — mission, vision, principles, next steps
+  adri_restart_brief.md            — mission, vision, principles, next steps
+  00_foundation/
+    product_charter.md             — mission, scope, success criteria
+    end_vision.md                  — narrative end-state vision
+    use_cases.md                   — use-case catalogue
+  01_system_model/
+    ontology.md                    — entity/relationship schema
+  02_reasoning/
+    recommendation_schema.md       — recommendation output format
 ```
