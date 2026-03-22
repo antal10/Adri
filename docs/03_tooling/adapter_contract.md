@@ -40,7 +40,7 @@ Each capability describes one operation the adapter supports.
 | `input_schema` | object | yes | JSON-Schema-style description of required and optional inputs. |
 | `output_schema` | object | yes | JSON-Schema-style description of the output. |
 | `artifact_types` | list of string | no | Ontology `Artifact` types this operation can consume (e.g., `SLDASM`, `mat`, `wav`). |
-| `entity_types_produced` | list of string | no | Ontology entity types this operation creates (e.g., `Component`, `Signal`). |
+| `entity_types_produced` | list of string | yes | Ontology entity types this operation creates (e.g., `Component`, `Signal`). Empty list if the operation produces no entities. |
 | `idempotent` | boolean | yes | Whether calling this operation twice with the same input produces the same output. |
 | `side_effects` | list of string | no | Any effects outside Adri (e.g., "writes file to disk," "sends data to instrument"). |
 
@@ -103,13 +103,27 @@ the adapter's `adapter_id` (e.g., `matlab.LICENSE_EXPIRED`).
 - Adapters must only produce entity types listed in their capability's
   `entity_types_produced`.
 
-### 6. Composability
+### 6. Artifact lifecycle
+
+Adri's core is responsible for creating the `Artifact` entity in the ontology
+before invoking an adapter. The core sets:
+
+- `id`: a unique identifier for this artifact.
+- `name`: the artifact's filename or user-provided label.
+- `source_adapter`: `"core"`.
+- `source_artifact`: the artifact's own `id` (self-referential).
+- `created_at`: the timestamp of ingestion.
+
+The adapter receives the artifact's `id` in the invocation `inputs`. All
+entities the adapter creates set their `source_artifact` to this ID.
+
+### 7. Composability
 
 Operations are the unit of composition. Adri's core composes workflows by
 chaining adapter operations. An adapter must not assume it will be called in
 any particular sequence. Each operation must be independently invocable.
 
-### 7. Health check
+### 8. Health check
 
 Every adapter must implement a `health` operation (not listed in capabilities)
 that returns:

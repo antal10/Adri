@@ -91,3 +91,12 @@ reversed, add a new entry that supersedes the old one.
 | **Rationale** | UC-01 requires design constraints (budget, weight, channel count) as first-class inputs, which the ontology could not represent. UC-03 requires control-loop authority (controller governs plant behavior), which had no relationship. Both additions are required by existing use cases, not speculative. |
 | **Principle** | 1 (Signals and systems thinking), 3 (Ontology over convention) |
 | **Supersedes** | — |
+
+### DEC-009
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-22 |
+| **Decision** | Made `entity_types_produced` required in the adapter contract capability declaration, and specified that Adri's core (not the adapter) creates Artifact entities before invocation. |
+| **Rationale** | `entity_types_produced` was optional but the ontology compliance rule demanded adapters only produce listed types — unenforceable when omitted. Artifact entity creation responsibility was unspecified, blocking the first adapter implementation. Both are minimal fixes discovered during pre-implementation architectural review. |
+| **Principle** | 2 (Adapter-first architecture), 4 (Evidence over opinion) |
+| **Supersedes** | — |
