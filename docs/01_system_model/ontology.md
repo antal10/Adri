@@ -49,8 +49,8 @@ property types. It is tool-agnostic and contains no implementation details.
 | Entity type | Description | Example |
 |-------------|-------------|---------|
 | `Subsystem` | A logical grouping of components that performs a function. | "Rear suspension," "telemetry stack," "cooling loop" |
-| `Workflow` | A composed sequence of operations Adri can execute. | "Ingest CAD, extract mounting points, propose sensors" |
 | `Artifact` | A file or dataset that an adapter can ingest. | SLDASM file, .mat dataset, .wav recording |
+| `Constraint` | A named design constraint with a bound and unit. | "Total sensor budget ≤ $2000," "Max added mass ≤ 0.5 kg," "Channel count ≤ 16" |
 
 ---
 
@@ -65,7 +65,9 @@ All relationships are directional: `source --[type]--> target`.
 | `senses` | Sensor | Signal | The sensor produces this signal from a measurand. |
 | `drives` | Actuator | Component | The actuator acts on this component. |
 | `feeds` | Signal, DAQChannel | SignalChain, DAQChannel, TransferFunction | Signal flow from one stage to the next. |
-| `constrains` | Component, Material, Interface | Component, Sensor, Signal | A physical or electrical constraint. |
+| `constrains` | Interface, Material | Component, Sensor, Signal | A physical or electrical limitation imposed by the source's properties (e.g., a connector's pin count limits sensor channels; a material's conductivity limits shielding effectiveness). |
+| `bounded_by` | Component, Sensor, Subsystem, Signal | Constraint | This entity is subject to this design constraint. |
+| `controls` | TransferFunction, Actuator | Signal, Component | Control-loop authority: the source governs the target's behavior. |
 | `implements` | TransferFunction | SignalChain | This transfer function describes a stage in the chain. |
 | `part_of` | Component, Signal, DAQChannel | Subsystem, SignalChain | Membership in a logical grouping. |
 | `derived_from` | Signal, TransferFunction | Signal, Artifact | Provenance: this entity was computed from another. |
@@ -120,6 +122,14 @@ enable validation and comparison.
 | `sensitivity` | float | Output per unit measurand. |
 | `bandwidth` | float (Hz) | Sensor bandwidth. |
 | `resolution` | float | Smallest detectable change. |
+
+### Constraint properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `bound_type` | enum: `upper`, `lower`, `equality`, `range` | Type of bound. |
+| `bound_value` | float or float[2] | The numeric bound (single value or [min, max] for range). |
+| `unit` | string | Unit of the constrained quantity. |
 
 ### TransferFunction properties
 

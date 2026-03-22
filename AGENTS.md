@@ -28,6 +28,12 @@ docs/
     ontology.md                    — entity/relationship schema
   02_reasoning/
     recommendation_schema.md       — recommendation output format
+  03_tooling/
+    adapter_contract.md            — adapter interface specification
+  04_validation/
+    evaluation_strategy.md         — correctness criteria for Adri outputs
+  05_governance/
+    decision_log.md                — append-only architectural decision record
 ```
 
 ## Required vocabulary
@@ -39,6 +45,7 @@ Use these terms precisely. Do not invent synonyms.
 | **Adapter**      | Interface between Adri's core and an external tool. |
 | **Artifact**     | Any engineering object Adri can ingest (CAD file, signal dataset, schematic, etc.). |
 | **Ontology**     | The shared schema that lets Adri reason across domains. |
+| **Constraint**   | A named design constraint with a bound, unit, and type — a first-class ontology entity. |
 | **Tool contract**| The API/interface an adapter must satisfy. |
 | **Signal**       | A first-class entity with spectrum, noise model, and transfer function. |
 | **Recommendation** | A structured output that includes evidence, assumptions, risks, and confidence. |

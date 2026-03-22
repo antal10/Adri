@@ -16,7 +16,8 @@ confidence level.
 | `goal` | string | yes | The objective this recommendation addresses. |
 | `verdict` | enum: `recommended`, `acceptable`, `not_recommended`, `insufficient_data` | yes | Overall assessment. |
 | `evidence` | list of Evidence | yes (min 1) | Data, simulation results, or derivations supporting the verdict. |
-| `assumptions` | list of Assumption | yes (min 1) | Conditions assumed true but not verified. |
+| `assumptions` | list of Assumption | yes (may be empty with justification) | Conditions assumed true but not verified. If empty, `no_assumptions_rationale` is required. |
+| `no_assumptions_rationale` | string | conditional | Required when `assumptions` list is empty. Explains why no assumptions are needed (e.g., direct measurement with no modeling). |
 | `risks` | list of Risk | yes (may be empty with justification) | What could go wrong if the recommendation is followed. |
 | `confidence` | Confidence | yes | How certain Adri is in this recommendation. |
 | `alternatives` | list of Alternative | no | Other options considered and why they were not preferred. |
