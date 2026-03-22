@@ -1,0 +1,17 @@
+[project]
+name = "adri"
+version = "0.1.0"
+description = "Engineering Operating System — bootstrap slice"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
