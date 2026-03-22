@@ -100,3 +100,30 @@ reversed, add a new entry that supersedes the old one.
 | **Rationale** | `entity_types_produced` was optional but the ontology compliance rule demanded adapters only produce listed types — unenforceable when omitted. Artifact entity creation responsibility was unspecified, blocking the first adapter implementation. Both are minimal fixes discovered during pre-implementation architectural review. |
 | **Principle** | 2 (Adapter-first architecture), 4 (Evidence over opinion) |
 | **Supersedes** | — |
+
+### DEC-010
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-22 |
+| **Decision** | The bootstrap ontology store is an in-memory dict-of-entities plus a list-of-relationship-triples, with five query operations sufficient for L0/L1 validation. |
+| **Rationale** | Persistence and query optimization are premature without evidence from the first adapter. A minimal in-memory structure satisfies L0/L1 evaluation requirements while avoiding technology commitments (no database, no graph library). |
+| **Principle** | 4 (Evidence over opinion), 6 (Tool-agnostic core) |
+| **Supersedes** | — |
+
+### DEC-011
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-22 |
+| **Decision** | The first reasoning component is a domain-specific stub named `vibration_reasoning_stub`, not a general reasoning engine. |
+| **Rationale** | A general engine requires composition, goal decomposition, and adapter selection — none of which have evidence-backed designs yet. A domain-specific stub for UC-02 (vibration analysis from test data) delivers the bootstrap success criterion (ingest one artifact, produce one recommendation) without premature generalization. The name includes "stub" to signal it will be replaced. |
+| **Principle** | 4 (Evidence over opinion), 5 (Composability) |
+| **Supersedes** | — |
+
+### DEC-012
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-22 |
+| **Decision** | Adding `no_risks_rationale` to the recommendation schema is deferred until the first L0 validator is implemented. |
+| **Rationale** | The asymmetry between `assumptions` (which has `no_assumptions_rationale`) and `risks` (which does not) was identified during review. However, the first implementation slice (UC-02 vibration stub) will always produce at least one risk, so the field is not blocking. The first L0 validator implementation will determine whether the field is needed or whether an alternative enforcement is preferable. |
+| **Principle** | 4 (Evidence over opinion) |
+| **Supersedes** | — |

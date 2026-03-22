@@ -109,3 +109,30 @@ Evaluation is applied at three levels, from cheapest to most expensive:
 
 Bootstrap phase requires L0 and L1 to pass for every output. L2 is applied
 manually until automation is built.
+
+---
+
+## Ontology store shape (bootstrap)
+
+The bootstrap ontology store is an in-memory structure with two collections:
+
+- **Entities**: a dict keyed by `entity_id`, where each value is the entity's
+  full property dict (including `id`, `name`, `source_adapter`,
+  `source_artifact`, `created_at`, entity-type-specific properties, and a
+  `type` field holding the ontology entity type).
+- **Relationships**: a list of `(source_id, relationship_type, target_id)`
+  triples.
+
+### Required query operations for L0/L1 validation
+
+| Operation | Signature (conceptual) | Used by |
+|-----------|----------------------|---------|
+| Get entity by ID | `get(entity_id) → entity or None` | L1 trace validity, L1 provenance |
+| List entities by type | `list_by_type(entity_type) → list` | L0 schema conformance |
+| List relationships by source | `relationships_from(source_id) → list of triples` | L0 relationship type validation |
+| List relationships by target | `relationships_to(target_id) → list of triples` | L0 relationship type validation |
+| Entity exists | `exists(entity_id) → bool` | L1 trace validity, L1 provenance (`source_artifact` check) |
+
+This store is not persisted. It lives for the duration of one reasoning loop
+invocation. Persistence is deferred until evidence from the first implementation
+reveals access-pattern requirements.
