@@ -142,6 +142,10 @@ def run(
     capability = REGISTRATION["capabilities"][0]
     compliance_checks = validate_adapter_entity_compliance(response, capability)
     all_checks.extend(compliance_checks)
+    if not l1_all_passed(compliance_checks):
+        result.validation_results = all_checks
+        result.error = "Adapter entity type compliance failed L1 validation."
+        return result
 
     # --- Step 6: L0-validate all entities + relationships ---
     entity_checks = validate_all_entities(store)

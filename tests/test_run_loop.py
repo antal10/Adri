@@ -164,12 +164,16 @@ class TestValidationFailures:
         }
         with mock.patch("run_loop.ingest_vibration_csv", return_value=bad_response):
             result = run(csv_path)
-            # Compliance checks capture that Component is not in entity_types_produced
+            assert not result.ok
+            assert "compliance" in result.error.lower()
+            # Compliance failure recorded in validation_results
             compliance_fails = [
                 c for c in result.validation_results
                 if not c["passed"] and "entity_type_compliance" in c["check"]
             ]
             assert len(compliance_fails) >= 1
+            # No recommendation produced (early exit)
+            assert result.recommendation is None
 
 
 # =========================================================================
