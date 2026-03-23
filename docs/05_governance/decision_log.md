@@ -127,3 +127,30 @@ reversed, add a new entry that supersedes the old one.
 | **Rationale** | The asymmetry between `assumptions` (which has `no_assumptions_rationale`) and `risks` (which does not) was identified during review. However, the first implementation slice (UC-02 vibration stub) will always produce at least one risk, so the field is not blocking. The first L0 validator implementation will determine whether the field is needed or whether an alternative enforcement is preferable. |
 | **Principle** | 4 (Evidence over opinion) |
 | **Supersedes** | — |
+
+### DEC-013
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-23 |
+| **Decision** | The MATLAB adapter uses a file-in/file-out contract: `request.json` + `vibration.csv` in, `features.json` + `raw_output.mat` + `spectrum.png` + `run_log.txt` out. No direct Python-to-MATLAB invocation. |
+| **Rationale** | File-based contracts decouple Adri from MATLAB's runtime (engine API, compiled runtime, or CLI). The same contract works whether MATLAB executes natively, via MATLAB Runtime, or is replaced by a NumPy fallback. This preserves future compatibility without premature transport commitments (DEC-005). |
+| **Principle** | 2 (Adapter-first architecture), 5 (Composability), 6 (Tool-agnostic core) |
+| **Supersedes** | — |
+
+### DEC-014
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-23 |
+| **Decision** | Run artifacts are persisted as flat files in a per-run directory. No database, no generic storage subsystem. |
+| **Rationale** | The first MATLAB slice needs reproducibility (source CSV copy, request manifest, raw outputs, logs) but no query capability beyond file reads. A flat directory per run is the simplest structure that satisfies provenance requirements without technology commitments. |
+| **Principle** | 4 (Evidence over opinion), 6 (Tool-agnostic core) |
+| **Supersedes** | — |
+
+### DEC-015
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-23 |
+| **Decision** | MATLAB-produced output artifacts are represented as `Artifact` entities linked to the source CSV via `references` relationships, not `derived_from`. |
+| **Rationale** | The ontology's `derived_from` relationship is defined for `Signal`/`TransferFunction` sources, not `Artifact`→`Artifact`. Using `references` (which allows `Artifact`→any) correctly expresses "this output file references the source data" without inventing new relationship types. |
+| **Principle** | 3 (Ontology over convention), 4 (Evidence over opinion) |
+| **Supersedes** | — |

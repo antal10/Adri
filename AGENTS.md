@@ -41,6 +41,9 @@ src/
   adapters/
     python_vibration/
       adapter.py                   — vibration CSV ingest + FFT peak detection
+    matlab_vibration/
+      adapter.py                   — MATLAB file-in/file-out vibration adapter
+      normalize.py                 — normalize MATLAB outputs into ontology
   validators/
     l0_schema.py                   — L0 schema conformance checks
     l1_consistency.py              — L1 cross-reference consistency checks
@@ -49,7 +52,8 @@ src/
   run_loop.py                      — 10-step bootstrap orchestrator
 tests/
   test_ontology_store.py           — ontology store unit tests
-  test_python_vibration_adapter.py — adapter unit tests
+  test_python_vibration_adapter.py — Python adapter unit tests
+  test_matlab_vibration_adapter.py — MATLAB adapter + normalization tests
   test_validators.py               — L0/L1 validator unit tests
   test_reasoning.py                — reasoning stub unit tests
   test_run_loop.py                 — orchestrator unit tests

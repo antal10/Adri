@@ -41,6 +41,7 @@ Other adapters may be added if they fit the ontology and tool contract.
 |-----------|----------|---------|
 | Ontology store | `src/adri/ontology_store.py` | In-memory entity/relationship store (DEC-010) |
 | Python vibration adapter | `src/adapters/python_vibration/` | Ingest single-channel vibration CSV, compute FFT peaks |
+| MATLAB vibration adapter | `src/adapters/matlab_vibration/` | File-in/file-out vibration analysis with persisted run artifacts |
 | L0 validator | `src/validators/l0_schema.py` | Schema conformance for entities, adapter responses, recommendations |
 | L1 validator | `src/validators/l1_consistency.py` | Cross-reference consistency (trace, provenance, compliance) |
 | Vibration reasoning stub | `src/reasoning/vibration_stub.py` | Deterministic rule-based recommendation from FFT peaks |
