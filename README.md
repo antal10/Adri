@@ -33,6 +33,24 @@ Other adapters may be added if they fit the ontology and tool contract.
 
 ## Current status
 
-**Bootstrap phase.** Documentation nucleus only — no implementation yet.
+**Bootstrap slice complete.** The first end-to-end loop works: ingest a vibration CSV, populate the ontology, validate at L0/L1, produce a recommendation, and validate it again.
+
+### What exists
+
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| Ontology store | `src/adri/ontology_store.py` | In-memory entity/relationship store (DEC-010) |
+| Python vibration adapter | `src/adapters/python_vibration/` | Ingest single-channel vibration CSV, compute FFT peaks |
+| L0 validator | `src/validators/l0_schema.py` | Schema conformance for entities, adapter responses, recommendations |
+| L1 validator | `src/validators/l1_consistency.py` | Cross-reference consistency (trace, provenance, compliance) |
+| Vibration reasoning stub | `src/reasoning/vibration_stub.py` | Deterministic rule-based recommendation from FFT peaks |
+| Run loop | `src/run_loop.py` | 10-step orchestrator wiring the full pipeline |
+
+### Running tests
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
 
 See [docs/adri_restart_brief.md](docs/adri_restart_brief.md) for the full project brief.
