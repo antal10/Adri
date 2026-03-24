@@ -1,27 +1,37 @@
-"""Tests for the MATLAB vibration adapter — file-in/file-out contract.
+"""Tests for the MATLAB vibration adapter contract scaffold.
 
-Covers:
-- Registration manifest conformance
-- Health check
-- Success path: valid CSV → features.json, raw_output.mat, run_log.txt
-- Failure paths: invalid header, missing file, bad schema
-- Normalization into ontology store with provenance
-- End-to-end: CSV → adapter → normalize → validate
+Split into:
+- Contract tests: file layout, response shape, error handling. These
+  validate the file-in/file-out contract regardless of backend.
+- Fallback tests: NumPy-specific behavior (backend labeling, features
+  accuracy). These run unconditionally since the fallback is always
+  available.
+- Backend honesty tests: verify that every artifact and response
+  correctly labels the producing backend.
+- Normalization tests: ontology population and provenance.
+- E2E tests (fallback): full slice through reasoning and validation.
+- Real MATLAB integration tests: skip cleanly when MATLAB is absent.
+
+All non-MATLAB tests exercise the numpy_fallback backend. They do NOT
+claim to validate MATLAB execution.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 from datetime import datetime, timezone
 
 import numpy as np
 import pytest
 
 from adapters.matlab_vibration.adapter import (
+    BACKEND,
     REGISTRATION,
     analyze_vibration_csv,
     health,
+    _resolve_backend,
 )
 from adapters.matlab_vibration.normalize import normalize_into_store
 from adri.ontology_store import OntologyStore
@@ -39,6 +49,17 @@ from validators.l1_consistency import (
     validate_recommendation_consistency,
 )
 from reasoning.vibration_stub import generate_recommendation
+
+
+# =========================================================================
+# Skip marker for real MATLAB
+# =========================================================================
+
+_matlab_available = shutil.which("matlab") is not None
+requires_matlab = pytest.mark.skipif(
+    not _matlab_available,
+    reason="MATLAB not on PATH — real integration tests skipped.",
+)
 
 
 # =========================================================================
@@ -117,7 +138,7 @@ def _make_request(artifact_id, file_path, run_dir, invocation_id="inv-m-001"):
 
 
 # =========================================================================
-# Registration
+# Contract tests — backend-independent
 # =========================================================================
 
 
@@ -142,11 +163,6 @@ class TestRegistration:
         assert cap["idempotent"] is True
 
 
-# =========================================================================
-# Health
-# =========================================================================
-
-
 class TestHealth:
     def test_health_returns_status(self):
         h = health()
@@ -157,22 +173,23 @@ class TestHealth:
         h = health()
         assert isinstance(h["tool_reachable"], bool)
 
+    def test_health_reports_backend(self):
+        h = health()
+        assert h["backend"] in ("matlab", "numpy_fallback")
 
-# =========================================================================
-# Success path
-# =========================================================================
 
+class TestContractFileLayout:
+    """Verify the file-in/file-out contract produces all required files."""
 
-class TestSuccessPath:
-    def test_status_is_success(self, three_tone_csv, run_dir):
+    def test_request_json_written(self, three_tone_csv, run_dir):
         req = _make_request("art-001", three_tone_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        assert resp["status"] == "success"
+        analyze_vibration_csv(req)
+        assert os.path.isfile(os.path.join(run_dir, "request.json"))
 
-    def test_invocation_id_echoed(self, three_tone_csv, run_dir):
-        req = _make_request("art-001", three_tone_csv, run_dir, "inv-xyz")
-        resp = analyze_vibration_csv(req)
-        assert resp["invocation_id"] == "inv-xyz"
+    def test_vibration_csv_copied(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        analyze_vibration_csv(req)
+        assert os.path.isfile(os.path.join(run_dir, "vibration.csv"))
 
     def test_features_json_written(self, three_tone_csv, run_dir):
         req = _make_request("art-001", three_tone_csv, run_dir)
@@ -189,15 +206,34 @@ class TestSuccessPath:
         analyze_vibration_csv(req)
         assert os.path.isfile(os.path.join(run_dir, "run_log.txt"))
 
-    def test_request_json_written(self, three_tone_csv, run_dir):
+    def test_artifacts_written_list(self, three_tone_csv, run_dir):
         req = _make_request("art-001", three_tone_csv, run_dir)
-        analyze_vibration_csv(req)
-        assert os.path.isfile(os.path.join(run_dir, "request.json"))
+        resp = analyze_vibration_csv(req)
+        written = resp["outputs"]["artifacts_written"]
+        assert "features.json" in written
+        assert "raw_output.mat" in written
+        assert "run_log.txt" in written
+        assert "request.json" in written
+        assert "vibration.csv" in written
 
-    def test_vibration_csv_copied(self, three_tone_csv, run_dir):
+    def test_response_shape(self, three_tone_csv, run_dir):
         req = _make_request("art-001", three_tone_csv, run_dir)
-        analyze_vibration_csv(req)
-        assert os.path.isfile(os.path.join(run_dir, "vibration.csv"))
+        resp = analyze_vibration_csv(req)
+        assert resp["status"] == "success"
+        assert "outputs" in resp
+        assert "entities_created" in resp
+        assert "duration_ms" in resp
+
+    def test_invocation_id_echoed(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir, "inv-xyz")
+        resp = analyze_vibration_csv(req)
+        assert resp["invocation_id"] == "inv-xyz"
+
+    def test_l0_validates_response(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        resp = analyze_vibration_csv(req)
+        checks = validate_adapter_response(resp)
+        assert l0_all_passed(checks), [c for c in checks if not c["passed"]]
 
     def test_features_has_required_keys(self, three_tone_csv, run_dir):
         req = _make_request("art-001", three_tone_csv, run_dir)
@@ -210,32 +246,19 @@ class TestSuccessPath:
         }
         assert required <= set(features.keys())
 
-    def test_sample_rate_correct(self, three_tone_csv, run_dir):
+    def test_features_json_is_valid_json(self, three_tone_csv, run_dir):
         req = _make_request("art-001", three_tone_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        assert abs(resp["outputs"]["features"]["sample_rate_hz"] - 1000.0) < 1.0
+        analyze_vibration_csv(req)
+        with open(os.path.join(run_dir, "features.json")) as f:
+            data = json.load(f)
+        assert "sample_rate_hz" in data
 
-    def test_detects_three_peaks(self, three_tone_csv, run_dir):
+    def test_mat_file_has_matlab_header(self, three_tone_csv, run_dir):
         req = _make_request("art-001", three_tone_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        peaks = resp["outputs"]["features"]["dominant_peak_frequencies_hz"]
-        assert len(peaks) >= 3
-
-    def test_peak_near_80hz(self, three_tone_csv, run_dir):
-        req = _make_request("art-001", three_tone_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        peaks = resp["outputs"]["features"]["dominant_peak_frequencies_hz"]
-        assert any(abs(p - 80.0) < 5.0 for p in peaks)
-
-    def test_rms_is_positive(self, three_tone_csv, run_dir):
-        req = _make_request("art-001", three_tone_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        assert resp["outputs"]["features"]["rms"] > 0
-
-    def test_frequency_resolution(self, three_tone_csv, run_dir):
-        req = _make_request("art-001", three_tone_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        assert resp["outputs"]["features"]["frequency_resolution_hz"] == pytest.approx(1.0, abs=0.1)
+        analyze_vibration_csv(req)
+        with open(os.path.join(run_dir, "raw_output.mat"), "rb") as f:
+            header = f.read(128)
+        assert b"MATLAB 5.0" in header
 
     def test_signal_entity_created(self, three_tone_csv, run_dir):
         req = _make_request("art-001", three_tone_csv, run_dir)
@@ -254,71 +277,10 @@ class TestSuccessPath:
         resp = analyze_vibration_csv(req)
         assert resp["entities_created"][0]["source_artifact"] == "art-001"
 
-    def test_features_json_is_valid_json(self, three_tone_csv, run_dir):
-        req = _make_request("art-001", three_tone_csv, run_dir)
-        analyze_vibration_csv(req)
-        with open(os.path.join(run_dir, "features.json")) as f:
-            data = json.load(f)
-        assert "sample_rate_hz" in data
 
-    def test_mat_file_header(self, three_tone_csv, run_dir):
-        req = _make_request("art-001", three_tone_csv, run_dir)
-        analyze_vibration_csv(req)
-        with open(os.path.join(run_dir, "raw_output.mat"), "rb") as f:
-            header = f.read(128)
-        assert b"MATLAB 5.0" in header
+class TestContractErrorPaths:
+    """Error handling — backend-independent."""
 
-    def test_artifacts_written_list(self, three_tone_csv, run_dir):
-        req = _make_request("art-001", three_tone_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        written = resp["outputs"]["artifacts_written"]
-        assert "features.json" in written
-        assert "raw_output.mat" in written
-        assert "run_log.txt" in written
-        assert "request.json" in written
-        assert "vibration.csv" in written
-
-    def test_duration_ms_present(self, three_tone_csv, run_dir):
-        req = _make_request("art-001", three_tone_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        assert "duration_ms" in resp
-        assert isinstance(resp["duration_ms"], int)
-
-    def test_l0_validates_response(self, three_tone_csv, run_dir):
-        req = _make_request("art-001", three_tone_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        checks = validate_adapter_response(resp)
-        assert l0_all_passed(checks), [c for c in checks if not c["passed"]]
-
-
-# =========================================================================
-# Zero signal path
-# =========================================================================
-
-
-class TestZeroSignal:
-    def test_success_with_zero_signal(self, zero_csv, run_dir):
-        req = _make_request("art-zero", zero_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        assert resp["status"] == "success"
-
-    def test_no_peaks(self, zero_csv, run_dir):
-        req = _make_request("art-zero", zero_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        assert resp["outputs"]["features"]["dominant_peak_frequencies_hz"] == []
-
-    def test_rms_near_zero(self, zero_csv, run_dir):
-        req = _make_request("art-zero", zero_csv, run_dir)
-        resp = analyze_vibration_csv(req)
-        assert resp["outputs"]["features"]["rms"] == pytest.approx(0.0, abs=1e-9)
-
-
-# =========================================================================
-# Failure paths
-# =========================================================================
-
-
-class TestFailurePaths:
     def test_bad_header(self, bad_header_csv, run_dir):
         req = _make_request("art-bad", bad_header_csv, run_dir)
         resp = analyze_vibration_csv(req)
@@ -377,6 +339,104 @@ class TestFailurePaths:
 
 
 # =========================================================================
+# Backend honesty tests
+# =========================================================================
+
+
+class TestBackendLabeling:
+    """Verify that every output honestly records the producing backend."""
+
+    def test_resolve_backend_returns_numpy_fallback(self):
+        assert _resolve_backend() == "numpy_fallback"
+
+    def test_backend_constant(self):
+        assert BACKEND == "numpy_fallback"
+
+    def test_response_outputs_backend(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        resp = analyze_vibration_csv(req)
+        assert resp["outputs"]["backend"] == "numpy_fallback"
+
+    def test_features_json_contains_backend(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        analyze_vibration_csv(req)
+        with open(os.path.join(run_dir, "features.json")) as f:
+            data = json.load(f)
+        assert data["backend"] == "numpy_fallback"
+
+    def test_request_json_contains_backend(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        analyze_vibration_csv(req)
+        with open(os.path.join(run_dir, "request.json")) as f:
+            data = json.load(f)
+        assert data["backend"] == "numpy_fallback"
+
+    def test_mat_header_contains_backend(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        analyze_vibration_csv(req)
+        with open(os.path.join(run_dir, "raw_output.mat"), "rb") as f:
+            header = f.read(116).decode("ascii", errors="replace")
+        assert "numpy_fallback" in header
+
+    def test_run_log_mentions_backend(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        analyze_vibration_csv(req)
+        with open(os.path.join(run_dir, "run_log.txt")) as f:
+            log = f.read()
+        assert "numpy_fallback" in log
+
+    def test_health_backend_field(self):
+        h = health()
+        assert h["backend"] == "numpy_fallback"
+
+
+# =========================================================================
+# Fallback-specific numerical tests
+# =========================================================================
+
+
+class TestFallbackNumerics:
+    """NumPy fallback accuracy tests. Not claims about MATLAB output."""
+
+    def test_sample_rate_correct(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        resp = analyze_vibration_csv(req)
+        assert abs(resp["outputs"]["features"]["sample_rate_hz"] - 1000.0) < 1.0
+
+    def test_detects_three_peaks(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        resp = analyze_vibration_csv(req)
+        peaks = resp["outputs"]["features"]["dominant_peak_frequencies_hz"]
+        assert len(peaks) >= 3
+
+    def test_peak_near_80hz(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        resp = analyze_vibration_csv(req)
+        peaks = resp["outputs"]["features"]["dominant_peak_frequencies_hz"]
+        assert any(abs(p - 80.0) < 5.0 for p in peaks)
+
+    def test_rms_is_positive(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        resp = analyze_vibration_csv(req)
+        assert resp["outputs"]["features"]["rms"] > 0
+
+    def test_frequency_resolution(self, three_tone_csv, run_dir):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        resp = analyze_vibration_csv(req)
+        assert resp["outputs"]["features"]["frequency_resolution_hz"] == pytest.approx(1.0, abs=0.1)
+
+    def test_zero_signal_no_peaks(self, zero_csv, run_dir):
+        req = _make_request("art-zero", zero_csv, run_dir)
+        resp = analyze_vibration_csv(req)
+        assert resp["outputs"]["features"]["dominant_peak_frequencies_hz"] == []
+
+    def test_zero_signal_rms_near_zero(self, zero_csv, run_dir):
+        req = _make_request("art-zero", zero_csv, run_dir)
+        resp = analyze_vibration_csv(req)
+        assert resp["outputs"]["features"]["rms"] == pytest.approx(0.0, abs=1e-9)
+
+
+# =========================================================================
 # Normalization & provenance
 # =========================================================================
 
@@ -403,7 +463,7 @@ class TestNormalization:
         assert summary["signal_id"] is not None
         assert store.exists(summary["signal_id"])
 
-    def test_signal_source_adapter_is_matlab(self, three_tone_csv, run_dir):
+    def test_signal_source_adapter_is_matlab_vibration(self, three_tone_csv, run_dir):
         store, _, summary = self._setup(three_tone_csv, run_dir)
         sig = store.get(summary["signal_id"])
         assert sig["source_adapter"] == "matlab_vibration"
@@ -472,12 +532,12 @@ class TestNormalization:
 
 
 # =========================================================================
-# End-to-end: CSV → adapter → normalize → reason → validate
+# E2E (fallback): CSV → adapter → normalize → reason → validate
 # =========================================================================
 
 
-class TestE2EMatlab:
-    """Full slice: adapter → persistence → normalization → reasoning → validation."""
+class TestE2EFallback:
+    """Full slice via numpy_fallback backend. Does NOT claim MATLAB execution."""
 
     def _run_full_slice(self, csv_path, run_dir, artifact_id="art-e2e"):
         store = OntologyStore()
@@ -515,28 +575,26 @@ class TestE2EMatlab:
         store, resp, summary, rec = self._run_full_slice(three_tone_csv, run_dir)
         assert rec["verdict"] == "recommended"
 
+    def test_e2e_backend_is_numpy_fallback(self, three_tone_csv, run_dir):
+        _, resp, _, _ = self._run_full_slice(three_tone_csv, run_dir)
+        assert resp["outputs"]["backend"] == "numpy_fallback"
+
     def test_e2e_all_validation_passes(self, three_tone_csv, run_dir):
         store, resp, summary, rec = self._run_full_slice(three_tone_csv, run_dir)
         all_checks = []
 
-        # L0 adapter response
         all_checks.extend(validate_adapter_response(resp))
 
-        # L1 entity compliance
         cap = REGISTRATION["capabilities"][0]
         all_checks.extend(validate_adapter_entity_compliance(resp, cap))
 
-        # L0 entities & relationships
         all_checks.extend(validate_all_entities(store))
         all_checks.extend(validate_all_relationships(store))
 
-        # L1 provenance
         all_checks.extend(validate_entity_provenance(store))
 
-        # L0 recommendation
         all_checks.extend(validate_recommendation(rec))
 
-        # L1 recommendation consistency
         all_checks.extend(validate_recommendation_consistency(rec, store))
 
         failed = [c for c in all_checks if not c["passed"]]
@@ -550,11 +608,9 @@ class TestE2EMatlab:
 
     def test_e2e_provenance_chain(self, three_tone_csv, run_dir):
         store, _, summary, rec = self._run_full_slice(three_tone_csv, run_dir)
-        # Signal → derived_from → source artifact
         signal_id = summary["signal_id"]
         rels = store.relationships_from(signal_id)
         assert any(r == "derived_from" and t == "art-e2e" for _, r, t in rels)
-        # Trace includes artifact and signal
         assert "art-e2e" in rec["trace"]
         assert signal_id in rec["trace"]
 
@@ -568,3 +624,26 @@ class TestE2EMatlab:
         with open(os.path.join(run_dir, "features.json")) as f:
             persisted = json.load(f)
         assert persisted == resp["outputs"]["features"]
+
+
+# =========================================================================
+# Real MATLAB integration tests — skip when MATLAB is absent
+# =========================================================================
+
+
+@requires_matlab
+class TestRealMatlabIntegration:
+    """These tests validate actual MATLAB execution.
+
+    They are skipped entirely when MATLAB is not on PATH. They exist as
+    placeholders for C7b, which will wire the real MATLAB backend.
+    """
+
+    def test_health_tool_reachable(self):
+        h = health()
+        assert h["tool_reachable"] is True
+
+    def test_placeholder_for_matlab_backend(self):
+        # C7b: when the real MATLAB backend is wired, this test will
+        # invoke analyze_vibration_csv and assert backend == "matlab".
+        pytest.skip("Real MATLAB backend not yet implemented (C7b).")

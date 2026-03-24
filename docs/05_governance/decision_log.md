@@ -154,3 +154,21 @@ reversed, add a new entry that supersedes the old one.
 | **Rationale** | The ontology's `derived_from` relationship is defined for `Signal`/`TransferFunction` sources, not `Artifact`→`Artifact`. Using `references` (which allows `Artifact`→any) correctly expresses "this output file references the source data" without inventing new relationship types. |
 | **Principle** | 3 (Ontology over convention), 4 (Evidence over opinion) |
 | **Supersedes** | — |
+
+### DEC-016
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-23 |
+| **Decision** | The MATLAB vibration adapter is a contract scaffold backed by a NumPy fallback. It does not invoke MATLAB. Every output artifact and response records the producing backend (`numpy_fallback` or `matlab`). |
+| **Rationale** | DEC-013 correctly defined the file-in/file-out contract but did not distinguish contract shape from execution backend. The current implementation validates the contract, persistence, and normalization layers without MATLAB. Claiming MATLAB integration without actual invocation is misleading. The `backend` field in all outputs makes the execution source explicit and machine-readable. |
+| **Principle** | 4 (Evidence over opinion) |
+| **Supersedes** | Clarifies DEC-013 (contract is scaffold, not live MATLAB integration). |
+
+### DEC-017
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-23 |
+| **Decision** | DEC-015's phrasing "MATLAB-produced output artifacts" is corrected: output artifacts are produced by whichever backend is active (currently `numpy_fallback`). The `references` relationship choice remains valid regardless of backend. |
+| **Rationale** | DEC-015's relationship design is correct but its language implied MATLAB execution. The relationship type choice (`references` over `derived_from` for Artifact→Artifact links) is backend-independent and does not need to change. Only the framing needed correction. |
+| **Principle** | 4 (Evidence over opinion) |
+| **Supersedes** | Corrects framing of DEC-015 (output artifacts are backend-produced, not necessarily MATLAB-produced). |

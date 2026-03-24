@@ -1,20 +1,20 @@
-"""MATLAB vibration adapter — file-in/file-out contract.
+"""MATLAB vibration adapter — file-in/file-out contract scaffold.
 
-Implements the adapter contract for single-channel vibration CSV
-analysis via a file-based interface. The canonical contract is:
+Defines the canonical file-based contract for single-channel vibration
+CSV analysis through a MATLAB adapter boundary:
 
   Input:  request.json + vibration.csv  (placed by Adri core)
   Output: features.json, raw_output.mat, spectrum.png, run_log.txt
 
-Transport: file I/O (DEC-005 allows any transport). This adapter
-writes/reads files in a run directory. Direct Python-to-MATLAB
-invocation is NOT the canonical interface for this slice — it can
-be added later behind the same contract.
+This module currently executes via a **NumPy fallback backend**.
+MATLAB is NOT invoked. The contract shape, file layout, persistence,
+and normalization are fully implemented so that swapping in a real
+MATLAB backend (CLI, Engine API, or compiled Runtime) requires only
+replacing the computation step — the file contract remains identical.
 
-When MATLAB is unavailable, the adapter computes FFT features using
-NumPy so the contract shape, persistence, and normalization layers
-can be validated. The ``tool_reachable`` field in health() reports
-whether MATLAB is actually present.
+Every response and persisted artifact records which backend produced
+it via the ``backend`` field. Consumers must not assume MATLAB
+execution unless ``backend == "matlab"``.
 
 Accepted CSV format:
 - Header: time_s,accel_m_s2
@@ -37,6 +37,21 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Backend identifier: "matlab" when real MATLAB executes, "numpy_fallback" now.
+BACKEND = "numpy_fallback"
+
+
+def _resolve_backend() -> str:
+    """Return the active backend identifier.
+
+    Returns "matlab" only if MATLAB is on PATH *and* a future code path
+    wires it in. Currently always returns "numpy_fallback".
+    """
+    # TODO(C7b): When real MATLAB invocation is implemented, check
+    # shutil.which("matlab") and return "matlab" if the MATLAB code
+    # path is wired in. For now, always fallback.
+    return BACKEND
+
 
 # --- Registration manifest (adapter contract §1) ---
 
@@ -50,7 +65,8 @@ REGISTRATION: dict[str, Any] = {
             "operation_id": "analyze_vibration_csv",
             "description": (
                 "Analyze a single-channel vibration CSV via file-based "
-                "MATLAB contract: ingest CSV, compute FFT, persist run artifacts."
+                "contract. Currently backed by NumPy fallback; MATLAB "
+                "backend not yet wired."
             ),
             "input_schema": {
                 "type": "object",
@@ -88,17 +104,19 @@ def health() -> dict[str, Any]:
     """Return adapter health status.
 
     Reports ``tool_reachable=True`` only if MATLAB is found on PATH.
-    The adapter can still operate (NumPy fallback) when MATLAB is absent.
+    ``backend`` always reflects the actual execution backend.
     """
-    matlab_available = shutil.which("matlab") is not None
+    matlab_on_path = shutil.which("matlab") is not None
+    backend = _resolve_backend()
     return {
         "adapter_id": REGISTRATION["adapter_id"],
-        "status": "healthy" if matlab_available else "degraded",
-        "tool_reachable": matlab_available,
+        "status": "healthy" if matlab_on_path else "degraded",
+        "tool_reachable": matlab_on_path,
+        "backend": backend,
         "message": (
-            "MATLAB found on PATH."
-            if matlab_available
-            else "MATLAB not on PATH; using NumPy fallback for FFT."
+            f"MATLAB found on PATH. Active backend: {backend}."
+            if matlab_on_path
+            else f"MATLAB not on PATH. Active backend: {backend}."
         ),
     }
 
@@ -126,7 +144,8 @@ def analyze_vibration_csv(request: dict[str, Any]) -> dict[str, Any]:
         ts = datetime.now(timezone.utc).isoformat()
         log_lines.append(f"[{ts}] {msg}")
 
-    _log(f"Invocation {invocation_id} started.")
+    backend = _resolve_backend()
+    _log(f"Invocation {invocation_id} started. Backend: {backend}.")
 
     # --- Validate operation_id ---
     if operation_id != "analyze_vibration_csv":
@@ -154,6 +173,7 @@ def analyze_vibration_csv(request: dict[str, Any]) -> dict[str, Any]:
         "operation_id": operation_id,
         "artifact_id": artifact_id,
         "source_file": file_path,
+        "backend": backend,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     _write_json(os.path.join(run_dir, "request.json"), request_manifest)
@@ -229,6 +249,7 @@ def analyze_vibration_csv(request: dict[str, Any]) -> dict[str, Any]:
         "dominant_peak_frequencies_hz": peaks_hz,
         "dominant_peak_magnitudes": peaks_mag,
         "frequency_resolution_hz": freq_resolution,
+        "backend": backend,
     }
 
     _log(f"Computed features: {len(peaks_hz)} peaks, RMS={rms:.6f}.")
@@ -245,9 +266,10 @@ def analyze_vibration_csv(request: dict[str, Any]) -> dict[str, Any]:
     _write_minimal_mat(
         os.path.join(run_dir, "raw_output.mat"),
         {"accel": accel, "freqs": freqs, "fft_mag": fft_mag},
+        backend=backend,
     )
     artifacts_written.append("raw_output.mat")
-    _log("Wrote raw_output.mat.")
+    _log(f"Wrote raw_output.mat (produced by {backend}).")
 
     # spectrum.png
     try:
@@ -288,6 +310,7 @@ def analyze_vibration_csv(request: dict[str, Any]) -> dict[str, Any]:
             "features": features,
             "run_dir": run_dir,
             "artifacts_written": artifacts_written,
+            "backend": backend,
         },
         "entities_created": [signal_entity],
         "duration_ms": int((time.monotonic() - t0) * 1000),
@@ -332,14 +355,17 @@ def _write_log(path: str, lines: list[str]) -> None:
         f.write("\n".join(lines) + "\n")
 
 
-def _write_minimal_mat(path: str, arrays: dict[str, np.ndarray]) -> None:
+def _write_minimal_mat(
+    path: str, arrays: dict[str, np.ndarray], backend: str = "numpy_fallback",
+) -> None:
     """Write a minimal MATLAB Level 5 MAT-file.
 
     Produces a valid .mat header + miMATRIX elements for each array.
     This avoids a scipy dependency while producing a file MATLAB can
-    read via ``load('raw_output.mat')``.
+    read via ``load('raw_output.mat')``. The header text records which
+    backend produced the file.
     """
-    header_text = "MATLAB 5.0 MAT-file, created by Adri matlab_vibration adapter"
+    header_text = f"MATLAB 5.0 MAT-file, Adri matlab_vibration adapter, backend={backend}"
     header = header_text.encode("ascii")
     header = header + b" " * (116 - len(header))  # pad to 116 bytes
     header += b"\x00" * 8  # subsystem data offset (unused)

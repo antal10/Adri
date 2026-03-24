@@ -1,10 +1,11 @@
 """Normalize MATLAB vibration adapter outputs into Adri ontology.
 
-Takes the adapter response and features dict, populates the ontology
-store with:
+Backend-independent: works identically whether the adapter response
+was produced by the NumPy fallback or a real MATLAB backend. Takes
+the adapter response and populates the ontology store with:
 - Signal entity (source_adapter=matlab_vibration, source_artifact=<csv artifact>)
-- Artifact entities for each produced file (features.json, raw_output.mat, etc.)
-- derived_from relationships linking outputs to the source artifact
+- Artifact entities for each produced output file
+- references relationships linking output artifacts to the source artifact
 - derived_from relationship linking Signal to source Artifact
 """
 
