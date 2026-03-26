@@ -74,6 +74,17 @@ LLM agreement never substitutes for these gates.
 
 *Cross-reference: evaluation_strategy.md (L0, L1, L2 levels map to G2/G4).*
 
+#### Change control gates
+
+All file-system and git operations require explicit, separate approvals:
+
+1. **Write gate**: file creates/edits require approval before execution.
+2. **Commit gate**: staging and committing require approval after writes are verified.
+3. **Push gate**: pushing to a remote requires approval after the commit is verified.
+
+Gates are sequential. Approval of an earlier gate does not imply approval of
+a later gate. When instructions conflict, the more restrictive instruction wins.
+
 ---
 
 ## 4. Unattended task boundaries
