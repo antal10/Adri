@@ -1,16 +1,28 @@
-"""Vibration reasoning stub — bootstrap slice.
+"""Vibration reasoning stub — bootstrap placeholder (DEC-011).
 
-Consumes an ontology store containing at least one Signal entity
-produced by the python_vibration adapter, plus the adapter response
-outputs (peaks_hz, peaks_amplitude). Produces a recommendation dict
-conforming to recommendation_schema.md.
+Consumes an ontology store containing at least one Signal entity produced
+by the matlab_vibration adapter, plus the adapter response outputs dict
+(which contains a "features" sub-dict per the file-in/file-out contract,
+DEC-013). Produces a recommendation dict conforming to
+recommendation_schema.md.
 
 This is a deterministic rule-based stub (no LLM). Rules:
 - Verdict: "recommended" if >= 1 peak detected, "insufficient_data" if 0.
 - Confidence: "moderate" (single-channel, simulation-free).
-- Assumptions: stationarity + no cross-axis coupling.
-- Risks: mounting alteration + cable noise.
+- Assumptions and risks are the four bootstrap priors documented in DEC-019.
 - Trace: artifact -> signal entity IDs used.
+
+Input shape expected (matlab_vibration response["outputs"]):
+    {
+        "features": {
+            "sample_rate_hz": float,
+            "duration_s": float,
+            "dominant_peak_frequencies_hz": [float, ...],
+            "dominant_peak_magnitudes": [float, ...],
+            ...
+        },
+        ...
+    }
 """
 
 from __future__ import annotations
@@ -45,10 +57,12 @@ def generate_recommendation(
     dict
         A recommendation conforming to recommendation_schema.md.
     """
-    peaks_hz: list[float] = adapter_outputs.get("peaks_hz", [])
-    peaks_amplitude: list[float] = adapter_outputs.get("peaks_amplitude", [])
-    sample_rate: float = adapter_outputs.get("sample_rate", 0.0)
-    num_samples: int = adapter_outputs.get("num_samples", 0)
+    features: dict[str, Any] = adapter_outputs.get("features", {})
+    peaks_hz: list[float] = features.get("dominant_peak_frequencies_hz", [])
+    peaks_amplitude: list[float] = features.get("dominant_peak_magnitudes", [])
+    sample_rate: float = features.get("sample_rate_hz", 0.0)
+    duration_s: float = features.get("duration_s", 0.0)
+    num_samples: int = int(sample_rate * duration_s) if sample_rate and duration_s else 0
 
     # --- Verdict decision ---
     if len(peaks_hz) == 0:
@@ -82,8 +96,8 @@ def generate_recommendation(
             "type": "data",
             "source": artifact_id,
             "summary": (
-                f"FFT of {num_samples} samples at {sample_rate:.0f} Hz "
-                f"yielded {len(peaks_hz)} peak(s)."
+                f"matlab_vibration adapter FFT of {num_samples} samples "
+                f"at {sample_rate:.0f} Hz yielded {len(peaks_hz)} peak(s)."
             ),
         },
     ]

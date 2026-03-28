@@ -81,15 +81,26 @@ class TestHappyPath:
 
 
 class TestAdapterFailures:
-    def test_unhealthy_adapter(self, csv_path):
+    def test_unavailable_adapter_fails(self, csv_path):
         with mock.patch(
             "run_loop.health",
-            return_value={"adapter_id": "python_vibration", "status": "unavailable",
-                          "tool_reachable": False, "message": "NumPy gone"},
+            return_value={"adapter_id": "matlab_vibration", "status": "unavailable",
+                          "tool_reachable": False, "message": "Adapter gone"},
         ):
             result = run(csv_path)
             assert not result.ok
             assert "health check" in result.error.lower()
+
+    def test_degraded_adapter_proceeds(self, csv_path):
+        """Degraded status (MATLAB absent, numpy_fallback active) must not abort."""
+        with mock.patch(
+            "run_loop.health",
+            return_value={"adapter_id": "matlab_vibration", "status": "degraded",
+                          "tool_reachable": False, "backend": "numpy_fallback",
+                          "message": "MATLAB not on PATH."},
+        ):
+            result = run(csv_path)
+            assert result.ok
 
     def test_adapter_returns_error(self, csv_path):
         error_response = {
@@ -101,7 +112,7 @@ class TestAdapterFailures:
                 "recoverable": False,
             },
         }
-        with mock.patch("run_loop.ingest_vibration_csv", return_value=error_response):
+        with mock.patch("run_loop.analyze_vibration_csv", return_value=error_response):
             result = run(csv_path)
             assert not result.ok
             assert "adapter error" in result.error.lower()
@@ -109,7 +120,6 @@ class TestAdapterFailures:
     def test_nonexistent_file(self):
         result = run("/nonexistent/path.csv")
         assert not result.ok
-        # Adapter should fail to parse — error propagates through
         assert result.error is not None
 
 
@@ -122,7 +132,7 @@ class TestValidationFailures:
     def test_bad_adapter_response_fails_l0(self, csv_path):
         """If adapter returns a response missing required fields, L0 catches it."""
         bad_response = {"status": "success"}  # missing invocation_id, outputs
-        with mock.patch("run_loop.ingest_vibration_csv", return_value=bad_response):
+        with mock.patch("run_loop.analyze_vibration_csv", return_value=bad_response):
             result = run(csv_path)
             assert not result.ok
             assert "L0" in result.error
@@ -133,18 +143,25 @@ class TestValidationFailures:
             "invocation_id": "inv-001",
             "status": "success",
             "outputs": {
-                "sample_rate": 1000.0,
-                "duration_s": 1.0,
-                "num_samples": 1000,
-                "peaks_hz": [80.0],
-                "peaks_amplitude": [0.5],
+                "features": {
+                    "sample_rate_hz": 1000.0,
+                    "duration_s": 1.0,
+                    "dominant_peak_frequencies_hz": [80.0],
+                    "dominant_peak_magnitudes": [0.5],
+                    "rms": 0.1,
+                    "frequency_resolution_hz": 1.0,
+                    "backend": "numpy_fallback",
+                },
+                "run_dir": "",
+                "artifacts_written": [],
+                "backend": "numpy_fallback",
             },
             "entities_created": [
                 {
-                    "id": "signal-accel-artifact-001",
+                    "id": "signal-matlab-artifact-001",
                     "type": "Signal",
                     "name": "accel-ch0",
-                    "source_adapter": "python_vibration",
+                    "source_adapter": "matlab_vibration",
                     "source_artifact": "artifact-001",
                     "created_at": "2026-03-22T00:00:00Z",
                     "domain": "time",
@@ -156,23 +173,21 @@ class TestValidationFailures:
                     "id": "component-bad",
                     "type": "Component",
                     "name": "should-not-exist",
-                    "source_adapter": "python_vibration",
+                    "source_adapter": "matlab_vibration",
                     "source_artifact": "artifact-001",
                     "created_at": "2026-03-22T00:00:00Z",
                 },
             ],
         }
-        with mock.patch("run_loop.ingest_vibration_csv", return_value=bad_response):
+        with mock.patch("run_loop.analyze_vibration_csv", return_value=bad_response):
             result = run(csv_path)
             assert not result.ok
             assert "compliance" in result.error.lower()
-            # Compliance failure recorded in validation_results
             compliance_fails = [
                 c for c in result.validation_results
                 if not c["passed"] and "entity_type_compliance" in c["check"]
             ]
             assert len(compliance_fails) >= 1
-            # No recommendation produced (early exit)
             assert result.recommendation is None
 
 

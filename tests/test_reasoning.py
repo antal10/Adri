@@ -25,9 +25,13 @@ def _make_store_and_outputs(
     peaks_hz: list[float] | None = None,
     peaks_amplitude: list[float] | None = None,
 ) -> tuple[OntologyStore, dict, str, str]:
-    """Return (store, adapter_outputs, artifact_id, signal_id)."""
+    """Return (store, adapter_outputs, artifact_id, signal_id).
+
+    adapter_outputs uses the matlab_vibration response["outputs"] shape
+    (features sub-dict, DEC-013) as consumed by vibration_stub.
+    """
     artifact_id = "artifact-vib-001"
-    signal_id = "signal-accel-artifact-vib-001"
+    signal_id = "signal-matlab-artifact-vib-001"
 
     store = OntologyStore()
     store.add_entity({
@@ -42,7 +46,7 @@ def _make_store_and_outputs(
         "id": signal_id,
         "type": "Signal",
         "name": "acceleration-channel-0",
-        "source_adapter": "python_vibration",
+        "source_adapter": "matlab_vibration",
         "source_artifact": artifact_id,
         "created_at": "2026-03-22T00:00:00Z",
         "domain": "time",
@@ -58,11 +62,18 @@ def _make_store_and_outputs(
         peaks_amplitude = [0.5, 0.3, 0.2]
 
     outputs = {
-        "sample_rate": 1000.0,
-        "duration_s": 1.0,
-        "num_samples": 1000,
-        "peaks_hz": peaks_hz,
-        "peaks_amplitude": peaks_amplitude,
+        "features": {
+            "sample_rate_hz": 1000.0,
+            "duration_s": 1.0,
+            "dominant_peak_frequencies_hz": peaks_hz,
+            "dominant_peak_magnitudes": peaks_amplitude,
+            "rms": 0.5,
+            "frequency_resolution_hz": 1.0,
+            "backend": "numpy_fallback",
+        },
+        "run_dir": "",
+        "artifacts_written": [],
+        "backend": "numpy_fallback",
     }
 
     return store, outputs, artifact_id, signal_id

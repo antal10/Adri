@@ -2,16 +2,20 @@
 
 Wires together the full ingest → validate → reason → validate pipeline:
 
-1. Register adapter (health check)
-2. Create Artifact entity in ontology store
-3. Invoke adapter (ingest CSV)
-4. L0-validate adapter response
-5. Merge adapter entities into ontology store
-6. L0-validate all entities + relationships
-7. L1-validate entity provenance
-8. Invoke reasoning stub
-9. L0-validate recommendation
+1.  Register adapter (health check)
+2.  Create Artifact entity in ontology store
+3.  Invoke matlab_vibration adapter (file-in/file-out contract, DEC-013)
+4.  L0-validate adapter response
+5.  Normalize adapter entities into ontology store
+6.  L0-validate all entities + relationships
+7.  L1-validate entity provenance
+8.  Invoke reasoning stub
+9.  L0-validate recommendation
 10. L1-validate recommendation consistency
+
+Signal analysis (FFT, peak detection) executes inside the matlab_vibration
+adapter. The numpy_fallback backend is active until a real MATLAB backend
+is wired (DEC-016). Python is the data pipeline; analysis belongs to MATLAB.
 
 Returns a RunResult with the recommendation, all validation results,
 and pass/fail status.
@@ -19,15 +23,17 @@ and pass/fail status.
 
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass, field
 from typing import Any
 
 from adri.ontology_store import OntologyStore
-from adapters.python_vibration.adapter import (
+from adapters.matlab_vibration.adapter import (
     REGISTRATION,
+    analyze_vibration_csv,
     health,
-    ingest_vibration_csv,
 )
+from adapters.matlab_vibration.normalize import normalize_into_store
 from reasoning.vibration_stub import generate_recommendation
 from validators.l0_schema import (
     all_passed as l0_all_passed,
@@ -58,8 +64,9 @@ def run(
     file_path: str,
     artifact_id: str = "artifact-001",
     invocation_id: str = "inv-001",
+    run_dir: str | None = None,
 ) -> RunResult:
-    """Execute the full bootstrap loop for a vibration CSV.
+    """Execute the full bootstrap loop for a vibration CSV via matlab_vibration.
 
     Parameters
     ----------
@@ -69,6 +76,9 @@ def run(
         ID to assign to the source artifact entity.
     invocation_id : str
         ID for the adapter invocation.
+    run_dir : str or None
+        Directory for adapter run artifacts (features.json, raw_output.mat,
+        spectrum.png, run_log.txt). Created as a tempdir if None (DEC-014).
 
     Returns
     -------
@@ -79,8 +89,10 @@ def run(
     all_checks: list[dict[str, Any]] = []
 
     # --- Step 1: Health check ---
+    # "degraded" is accepted: MATLAB not on PATH, numpy_fallback active (DEC-016).
+    # Only "unavailable" is a blocking failure.
     h = health()
-    if h["status"] != "healthy":
+    if h["status"] not in ("healthy", "degraded"):
         result.error = f"Adapter health check failed: {h.get('message', '')}"
         return result
 
@@ -99,16 +111,18 @@ def run(
     })
 
     # --- Step 3: Invoke adapter ---
+    _run_dir = run_dir or tempfile.mkdtemp(prefix="adri_run_")
     request = {
         "invocation_id": invocation_id,
         "adapter_id": REGISTRATION["adapter_id"],
-        "operation_id": "ingest_vibration_csv",
+        "operation_id": "analyze_vibration_csv",
         "inputs": {
             "artifact_id": artifact_id,
             "file_path": file_path,
+            "run_dir": _run_dir,
         },
     }
-    response = ingest_vibration_csv(request)
+    response = analyze_vibration_csv(request)
 
     # --- Step 4: L0-validate adapter response ---
     resp_checks = validate_adapter_response(response)
@@ -118,20 +132,15 @@ def run(
         result.error = "Adapter response failed L0 validation."
         return result
 
-    # Check for adapter error status
     if response["status"] != "success":
         err = response.get("error", {})
         result.validation_results = all_checks
         result.error = f"Adapter error: {err.get('message', 'unknown')}"
         return result
 
-    # --- Step 5: Merge entities into store ---
-    signal_id = None
-    for entity in response.get("entities_created", []):
-        store.add_entity(entity)
-        if entity.get("type") == "Signal":
-            signal_id = entity["id"]
-            store.add_relationship(signal_id, "derived_from", artifact_id)
+    # --- Step 5: Normalize entities into ontology store ---
+    summary = normalize_into_store(store, response, artifact_id)
+    signal_id = summary["signal_id"]
 
     if signal_id is None:
         result.validation_results = all_checks

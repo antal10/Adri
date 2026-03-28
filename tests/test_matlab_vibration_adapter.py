@@ -558,17 +558,7 @@ class TestE2EFallback:
         summary = normalize_into_store(store, resp, artifact_id)
         signal_id = summary["signal_id"]
 
-        # Translate features to adapter_outputs format for reasoning stub
-        features = resp["outputs"]["features"]
-        adapter_outputs = {
-            "peaks_hz": features["dominant_peak_frequencies_hz"],
-            "peaks_amplitude": features["dominant_peak_magnitudes"],
-            "sample_rate": features["sample_rate_hz"],
-            "duration_s": features["duration_s"],
-            "num_samples": int(features["duration_s"] * features["sample_rate_hz"]),
-        }
-
-        rec = generate_recommendation(store, adapter_outputs, artifact_id, signal_id)
+        rec = generate_recommendation(store, resp["outputs"], artifact_id, signal_id)
         return store, resp, summary, rec
 
     def test_e2e_success(self, three_tone_csv, run_dir):

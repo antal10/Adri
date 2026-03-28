@@ -92,24 +92,13 @@ class TestIngestSuccess:
         assert "sample_rate" in outputs
         assert "duration_s" in outputs
         assert "num_samples" in outputs
-        assert "peaks_hz" in outputs
-        assert "peaks_amplitude" in outputs
+        # No signal-analysis outputs: FFT and peak detection belong to MATLAB.
+        assert "peaks_hz" not in outputs
+        assert "peaks_amplitude" not in outputs
 
     def test_sample_rate_is_1000(self):
         resp = ingest_vibration_csv(_make_request())
         assert abs(resp["outputs"]["sample_rate"] - 1000.0) < 1.0
-
-    def test_detects_three_peaks(self):
-        resp = ingest_vibration_csv(_make_request())
-        peaks = resp["outputs"]["peaks_hz"]
-        assert len(peaks) == 3
-
-    def test_peak_frequencies_correct(self):
-        resp = ingest_vibration_csv(_make_request())
-        peaks = sorted(resp["outputs"]["peaks_hz"])
-        expected = [80.0, 200.0, 450.0]
-        for measured, exp in zip(peaks, expected):
-            assert abs(measured - exp) < 2.0, f"Expected ~{exp} Hz, got {measured}"
 
     def test_signal_entity_created(self):
         resp = ingest_vibration_csv(_make_request())

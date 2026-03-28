@@ -1,7 +1,12 @@
-"""Python vibration adapter — bootstrap slice.
+"""Python vibration adapter — data pipeline only.
 
 Implements the adapter contract for ingesting single-channel vibration
-CSV files. Transport: direct function call (DEC-005).
+CSV files. Role: data pipeline — ingest, validate format, return a raw
+time-series Signal entity with basic metadata.
+
+Python does NOT perform signal analysis (FFT, peak detection, filtering).
+Those operations belong to MATLAB. See CLAUDE.md tool ownership and
+AGENTS.md constraint #8.
 
 Accepted CSV format:
 - Columns: time_s, accel_m_s2
@@ -21,14 +26,15 @@ import numpy as np
 
 REGISTRATION = {
     "adapter_id": "python_vibration",
-    "adapter_version": "0.1.0",
+    "adapter_version": "0.2.0",
     "tool_name": "Python (NumPy)",
     "tool_version": None,
     "capabilities": [
         {
             "operation_id": "ingest_vibration_csv",
             "description": (
-                "Ingest a single-channel vibration CSV and compute FFT spectral peaks."
+                "Ingest a single-channel vibration CSV and return a raw "
+                "time-series Signal entity with basic metadata."
             ),
             "input_schema": {
                 "type": "object",
@@ -44,8 +50,6 @@ REGISTRATION = {
                     "sample_rate": {"type": "number"},
                     "duration_s": {"type": "number"},
                     "num_samples": {"type": "integer"},
-                    "peaks_hz": {"type": "array", "items": {"type": "number"}},
-                    "peaks_amplitude": {"type": "array", "items": {"type": "number"}},
                 },
             },
             "artifact_types": ["csv"],
@@ -88,7 +92,9 @@ def ingest_vibration_csv(request: dict[str, Any]) -> dict[str, Any]:
     """Ingest a single-channel vibration CSV.
 
     Request must conform to the adapter contract invocation protocol (§3).
-    Returns a response with Signal entity stub and spectral peak data.
+    Returns a Signal entity with basic metadata. Does not perform signal
+    analysis — FFT and peak detection belong to MATLAB (CLAUDE.md tool
+    ownership; AGENTS.md constraint #8).
     """
     invocation_id = request.get("invocation_id", "")
     operation_id = request.get("operation_id", "")
@@ -150,15 +156,12 @@ def ingest_vibration_csv(request: dict[str, Any]) -> dict[str, Any]:
             recoverable=False,
         )
 
-    # Compute sample rate from time column
+    # Compute sample rate and duration from time column
     dt = np.median(np.diff(time_s))
     sample_rate = 1.0 / dt
     duration_s = float(time_s[-1] - time_s[0]) + dt
 
-    # FFT and peak detection
-    peaks_hz, peaks_amplitude = _find_spectral_peaks(accel, sample_rate)
-
-    # Build Signal entity stub (domain: "time" — the CSV is a time-series)
+    # Build Signal entity (domain: "time" — the CSV is a time-series)
     now = datetime.now(timezone.utc).isoformat()
     signal_entity = {
         "id": f"signal-accel-{artifact_id}",
@@ -180,47 +183,9 @@ def ingest_vibration_csv(request: dict[str, Any]) -> dict[str, Any]:
             "sample_rate": float(sample_rate),
             "duration_s": float(duration_s),
             "num_samples": int(num_samples),
-            "peaks_hz": [float(f) for f in peaks_hz],
-            "peaks_amplitude": [float(a) for a in peaks_amplitude],
         },
         "entities_created": [signal_entity],
     }
-
-
-def _find_spectral_peaks(
-    signal: np.ndarray, sample_rate: float, threshold_ratio: float = 0.1
-) -> tuple[list[float], list[float]]:
-    """Compute FFT and return frequencies/amplitudes of peaks above threshold.
-
-    Threshold is relative to the maximum amplitude in the spectrum.
-    """
-    n = len(signal)
-    fft_vals = np.fft.rfft(signal)
-    fft_mag = (2.0 / n) * np.abs(fft_vals)
-    freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate)
-
-    # Skip DC component
-    fft_mag[0] = 0.0
-
-    max_mag = np.max(fft_mag)
-    if max_mag == 0:
-        return [], []
-
-    threshold = threshold_ratio * max_mag
-
-    # Find local maxima above threshold
-    peaks_hz = []
-    peaks_amplitude = []
-    for i in range(1, len(fft_mag) - 1):
-        if (
-            fft_mag[i] > threshold
-            and fft_mag[i] > fft_mag[i - 1]
-            and fft_mag[i] > fft_mag[i + 1]
-        ):
-            peaks_hz.append(float(freqs[i]))
-            peaks_amplitude.append(float(fft_mag[i]))
-
-    return peaks_hz, peaks_amplitude
 
 
 def _error_response(

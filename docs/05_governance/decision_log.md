@@ -181,3 +181,12 @@ reversed, add a new entry that supersedes the old one.
 | **Rationale** | Existing practice around gates (L0/L1 validators, test suite, PR review) and role boundaries (human merges, agents build) was implicit. Formalizing it reduces ambiguity for unattended task execution and cross-model audit loops without altering any technical decision. |
 | **Principle** | 4 (Evidence over opinion) |
 | **Supersedes** | — |
+
+### DEC-019
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-28 |
+| **Decision** | Accepted four engineering priors as bootstrap-only documentation for the UC-02 single-channel vibration stub. |
+| **Rationale** | AGENTS.md constraint #2 prohibits undocumented implementation details. The vibration_stub (DEC-011) hard-codes domain assumptions and risks not documented elsewhere. This decision records them as accepted priors for the UC-02 / bootstrap path only. They are standard DSP and instrumentation conventions for short-duration, single-axis accelerometer data, not universal vibration truths. The four priors are: (1) A-01 — signal stationarity over the measurement window, appropriate for short single-burst test data where non-stationarity is not expected; (2) A-02 — no significant cross-axis coupling, appropriate for a single-axis accelerometer aligned to the primary vibration direction; (3) R-01 — sensor mounting may alter local dynamics, a standard instrumentation concern for any contact sensor; (4) R-02 — cable routing may introduce noise pickup from power electronics, a standard EMC concern for mixed-signal environments. The verdict rule (recommended if ≥ 1 spectral peak detected) is a bootstrap-only heuristic. All four priors and the verdict rule must be re-evaluated or replaced when a real MATLAB analysis backend produces verified results. They do not extend to multi-channel, non-stationary, high-frequency, or production contexts. |
+| **Principle** | 4 (Evidence over opinion) |
+| **Supersedes** | — |
