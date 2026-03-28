@@ -1,0 +1,1 @@
+This is a vision communication artifact only. It demonstrates the Adri concept using a suspension corner (wheel, shock, control arms, road bump) analyzed across SOLIDWORKS, MATLAB, LabVIEW, and Python panels. It is NOT part of the Adri implementation. Do not reference its architecture, technology choices, or data structures in any build decisions.
