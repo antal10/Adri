@@ -176,13 +176,22 @@ reversed, add a new entry that supersedes the old one.
 ### DEC-018
 | Field | Value |
 |-------|-------|
+| **Date** | 2026-03-24 |
+| **Decision** | Adopted `docs/06_operations/operating_doctrine.md` as additive process infrastructure. It codifies product doctrine, role model, gate list, unattended task boundaries, and phase/tier mapping. No architecture, ontology, or code changes. |
+| **Rationale** | Existing practice around gates (L0/L1 validators, test suite, PR review) and role boundaries (human merges, agents build) was implicit. Formalizing it reduces ambiguity for unattended task execution and cross-model audit loops without altering any technical decision. |
+| **Principle** | 4 (Evidence over opinion) |
+| **Supersedes** | — |
+
+### DEC-019
+| Field | Value |
+|-------|-------|
 | **Date** | 2026-03-30 |
 | **Decision** | Constraint evaluation is a reasoning-layer function that takes an ontology store and a dict of measured values, not a validator. Context assembly (not adapters) creates Constraint entities and `bounded_by` relationships. |
 | **Rationale** | Constraints are design inputs, not adapter outputs. The evaluator compares measured values against bounds and produces structured pass/fail results with margin. Placing constraint setup in context assembly (DEC-003) keeps adapters free of cross-domain knowledge. Placing evaluation in the reasoning layer lets results feed directly into recommendations as evidence. |
 | **Principle** | 2 (Adapter-first architecture), 4 (Evidence over opinion), 5 (Composability) |
 | **Supersedes** | — |
 
-### DEC-019
+### DEC-020
 | Field | Value |
 |-------|-------|
 | **Date** | 2026-03-30 |

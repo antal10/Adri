@@ -49,7 +49,7 @@ docs/
 src/
   adri/
     ontology_store.py              — in-memory entity/relationship store (DEC-010)
-    context_assembly.py            — constraint setup + cross-domain linking scaffold (DEC-019)
+    context_assembly.py            — constraint setup + cross-domain linking scaffold (DEC-020)
   adapters/
     python_vibration/
       adapter.py                   — vibration CSV ingest + FFT peak detection
@@ -61,7 +61,7 @@ src/
     l1_consistency.py              — L1 cross-reference consistency checks
   reasoning/
     vibration_stub.py              — deterministic vibration recommendation stub
-    constraint_evaluator.py        — evaluate design constraints against measured values (DEC-018)
+    constraint_evaluator.py        — evaluate design constraints against measured values (DEC-019)
   run_loop.py                      — 10-step bootstrap orchestrator
 tests/
   test_ontology_store.py           — ontology store unit tests
