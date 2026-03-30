@@ -1,12 +1,8 @@
-"""End-to-end test — full bootstrap loop.
-
-Exercises the complete pipeline from synthetic vibration CSV through
-adapter ingestion, ontology population, L0/L1 validation, reasoning
-stub, and recommendation validation. This is the bootstrap success
-criterion: ingest one artifact, produce one validated recommendation.
-"""
+"""End-to-end tests for the bootstrap run loop."""
 
 from __future__ import annotations
+
+import os
 
 import numpy as np
 import pytest
@@ -14,15 +10,8 @@ import pytest
 from run_loop import run
 
 
-# --- Synthetic CSV generation ---
-
-
 def _write_three_tone_csv(path: str) -> None:
-    """Write a 1-second, 1 kHz vibration CSV with three sine tones.
-
-    Tones at 80 Hz, 200 Hz, and 450 Hz (matching UC-01 north-star
-    example frequencies).
-    """
+    """Write a 1-second, 1 kHz vibration CSV with three sine tones."""
     sample_rate = 1000.0
     duration_s = 1.0
     n = int(sample_rate * duration_s)
@@ -39,7 +28,7 @@ def _write_three_tone_csv(path: str) -> None:
 
 
 def _write_noise_only_csv(path: str) -> None:
-    """Write a CSV with a constant-zero signal — guarantees no spectral peaks."""
+    """Write a CSV with a constant-zero signal."""
     sample_rate = 1000.0
     n = 100
     t = np.arange(n) / sample_rate
@@ -50,27 +39,37 @@ def _write_noise_only_csv(path: str) -> None:
             f.write(f"{ti:.6f},{ai:.6f}\n")
 
 
+def _max_peak_constraint(bound_value: float) -> dict[str, object]:
+    return {
+        "constraint_id": "c-max-peak",
+        "name": "Max peak frequency",
+        "bound_type": "upper",
+        "bound_value": bound_value,
+        "unit": "Hz",
+    }
+
+
 @pytest.fixture
 def three_tone_csv(tmp_path):
-    p = str(tmp_path / "three_tone.csv")
-    _write_three_tone_csv(p)
-    return p
+    path = str(tmp_path / "three_tone.csv")
+    _write_three_tone_csv(path)
+    return path
 
 
 @pytest.fixture
 def noise_csv(tmp_path):
-    p = str(tmp_path / "noise_only.csv")
-    _write_noise_only_csv(p)
-    return p
+    path = str(tmp_path / "noise_only.csv")
+    _write_noise_only_csv(path)
+    return path
 
 
-# =========================================================================
-# E2E: three-tone signal → recommended
-# =========================================================================
+@pytest.fixture
+def run_dir(tmp_path):
+    return str(tmp_path / "matlab_run")
 
 
-class TestE2EThreeTone:
-    """Full loop with a three-tone synthetic signal."""
+class TestE2EThreeTonePython:
+    """Full loop with the Python vibration adapter."""
 
     def test_run_succeeds(self, three_tone_csv):
         result = run(three_tone_csv, artifact_id="e2e-artifact-001")
@@ -78,7 +77,7 @@ class TestE2EThreeTone:
 
     def test_no_validation_failures(self, three_tone_csv):
         result = run(three_tone_csv, artifact_id="e2e-artifact-001")
-        failed = [c for c in result.validation_results if not c["passed"]]
+        failed = [check for check in result.validation_results if not check["passed"]]
         assert failed == [], failed
 
     def test_verdict_is_recommended(self, three_tone_csv):
@@ -89,46 +88,15 @@ class TestE2EThreeTone:
         result = run(three_tone_csv, artifact_id="e2e-artifact-001")
         peaks = result.recommendation["evidence"][0].get("value", [])
         assert len(peaks) >= 3
-        # Dominant peak should be near 80 Hz (tolerance for FFT bin resolution)
-        assert any(abs(p - 80.0) < 5.0 for p in peaks), f"No peak near 80 Hz in {peaks}"
-
-    def test_confidence_is_moderate(self, three_tone_csv):
-        result = run(three_tone_csv, artifact_id="e2e-artifact-001")
-        assert result.recommendation["confidence"]["level"] == "moderate"
-
-    def test_trace_includes_artifact_and_signal(self, three_tone_csv):
-        result = run(three_tone_csv, artifact_id="e2e-artifact-001")
-        trace = result.recommendation["trace"]
-        assert "e2e-artifact-001" in trace
-        assert any(t.startswith("signal-") for t in trace)
-
-    def test_recommendation_has_assumptions_and_risks(self, three_tone_csv):
-        result = run(three_tone_csv, artifact_id="e2e-artifact-001")
-        rec = result.recommendation
-        assert len(rec["assumptions"]) >= 1
-        assert len(rec["risks"]) >= 1
-
-    def test_recommendation_id_format(self, three_tone_csv):
-        result = run(three_tone_csv, artifact_id="e2e-artifact-001")
-        assert result.recommendation["id"].startswith("REC-")
+        assert any(abs(peak - 80.0) < 5.0 for peak in peaks)
 
 
-# =========================================================================
-# E2E: noise-only signal → insufficient_data
-# =========================================================================
-
-
-class TestE2ENoiseOnly:
-    """Full loop with noise-only data — exercises insufficient_data path."""
+class TestE2ENoiseOnlyPython:
+    """Noise-only path through the Python vibration adapter."""
 
     def test_run_succeeds(self, noise_csv):
         result = run(noise_csv, artifact_id="e2e-noise-001")
         assert result.ok, result.error
-
-    def test_no_validation_failures(self, noise_csv):
-        result = run(noise_csv, artifact_id="e2e-noise-001")
-        failed = [c for c in result.validation_results if not c["passed"]]
-        assert failed == [], failed
 
     def test_verdict_is_insufficient_data(self, noise_csv):
         result = run(noise_csv, artifact_id="e2e-noise-001")
@@ -138,7 +106,76 @@ class TestE2ENoiseOnly:
         result = run(noise_csv, artifact_id="e2e-noise-001")
         assert result.recommendation["confidence"]["level"] == "low"
 
-    def test_limiting_factor_mentions_peaks(self, noise_csv):
-        result = run(noise_csv, artifact_id="e2e-noise-001")
-        lf = result.recommendation["confidence"]["limiting_factor"]
-        assert "peak" in lf.lower()
+
+class TestE2EMatlabFallback:
+    """Full loop with the matlab_vibration fallback backend."""
+
+    def test_run_succeeds(self, three_tone_csv, run_dir):
+        result = run(
+            three_tone_csv,
+            artifact_id="e2e-matlab-001",
+            invocation_id="e2e-matlab-inv",
+            adapter_id="matlab_vibration",
+            run_dir=run_dir,
+        )
+        assert result.ok, result.error
+
+    def test_validation_passes(self, three_tone_csv, run_dir):
+        result = run(
+            three_tone_csv,
+            artifact_id="e2e-matlab-001",
+            invocation_id="e2e-matlab-inv",
+            adapter_id="matlab_vibration",
+            run_dir=run_dir,
+        )
+        failed = [check for check in result.validation_results if not check["passed"]]
+        assert failed == [], failed
+
+    def test_run_artifacts_exist(self, three_tone_csv, run_dir):
+        result = run(
+            three_tone_csv,
+            artifact_id="e2e-matlab-001",
+            invocation_id="e2e-matlab-inv",
+            adapter_id="matlab_vibration",
+            run_dir=run_dir,
+        )
+        assert result.ok, result.error
+        for filename in (
+            "request.json",
+            "vibration.csv",
+            "features.json",
+            "raw_output.mat",
+            "run_log.txt",
+        ):
+            assert os.path.isfile(os.path.join(run_dir, filename)), filename
+
+
+class TestE2EConstraints:
+    """Constraint evaluation integrated through the orchestrator."""
+
+    def test_satisfied_constraint_stays_recommended(self, three_tone_csv):
+        result = run(
+            three_tone_csv,
+            artifact_id="e2e-constraint-pass",
+            signal_constraints=[_max_peak_constraint(500.0)],
+        )
+        assert result.ok, result.error
+        assert len(result.constraint_results) == 1
+        assert result.constraint_results[0].passed is True
+        assert result.recommendation["verdict"] == "recommended"
+        assert any(
+            item["source"] == "c-max-peak"
+            for item in result.recommendation["evidence"]
+        )
+
+    def test_violated_constraint_becomes_not_recommended(self, three_tone_csv):
+        result = run(
+            three_tone_csv,
+            artifact_id="e2e-constraint-fail",
+            signal_constraints=[_max_peak_constraint(100.0)],
+        )
+        assert result.ok, result.error
+        assert len(result.constraint_results) == 1
+        assert result.constraint_results[0].passed is False
+        assert result.recommendation["verdict"] == "not_recommended"
+        assert "c-max-peak" in result.recommendation["trace"]

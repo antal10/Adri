@@ -181,3 +181,21 @@ reversed, add a new entry that supersedes the old one.
 | **Rationale** | Existing practice around gates (L0/L1 validators, test suite, PR review) and role boundaries (human merges, agents build) was implicit. Formalizing it reduces ambiguity for unattended task execution and cross-model audit loops without altering any technical decision. |
 | **Principle** | 4 (Evidence over opinion) |
 | **Supersedes** | — |
+
+### DEC-019
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-30 |
+| **Decision** | Constraint evaluation is a reasoning-layer function that takes an ontology store and a dict of measured values, not a validator. Context assembly (not adapters) creates Constraint entities and `bounded_by` relationships. |
+| **Rationale** | Constraints are design inputs, not adapter outputs. The evaluator compares measured values against bounds and produces structured pass/fail results with margin. Placing constraint setup in context assembly (DEC-003) keeps adapters free of cross-domain knowledge. Placing evaluation in the reasoning layer lets results feed directly into recommendations as evidence. |
+| **Principle** | 2 (Adapter-first architecture), 4 (Evidence over opinion), 5 (Composability) |
+| **Supersedes** | — |
+
+### DEC-020
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-30 |
+| **Decision** | Context assembly is implemented as a module (`context_assembly.py`) in the `adri` package with constraint setup functions and scaffold interfaces for cross-domain linking. |
+| **Rationale** | DEC-003 established that only context assembly creates cross-domain relationships. The bootstrap implementation provides `add_constraint`, `bind_constraint`, and `link_spatial_co_location` — the minimum needed to exercise Constraint entities end-to-end. The `link_by_shared_artifact` function is a scaffold whose linking rules will be implemented when a second domain adapter exists. |
+| **Principle** | 3 (Ontology over convention), 5 (Composability) |
+| **Supersedes** | — |

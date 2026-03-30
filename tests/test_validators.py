@@ -106,6 +106,23 @@ def _populated_store() -> OntologyStore:
     return store
 
 
+def _constraint(
+    eid: str = "constraint-001",
+    artifact_id: str = "artifact-001",
+) -> dict:
+    return {
+        "id": eid,
+        "type": "Constraint",
+        "name": "Max peak frequency",
+        "source_adapter": "core",
+        "source_artifact": artifact_id,
+        "created_at": "2026-03-30T00:00:00Z",
+        "bound_type": "upper",
+        "bound_value": 500.0,
+        "unit": "Hz",
+    }
+
+
 # =========================================================================
 # L0 — Entity validation
 # =========================================================================
@@ -325,6 +342,13 @@ class TestL1RecommendationConsistency:
         results = validate_recommendation_consistency(rec, store)
         fails = l1_failures(results)
         assert any("evidence" in f["check"] and "grounded" in f["check"] for f in fails)
+
+    def test_constraint_entity_evidence_source_passes(self):
+        store = _populated_store()
+        store.add_entity(_constraint())
+        rec = _minimal_recommendation(evidence_source="constraint-001")
+        results = validate_recommendation_consistency(rec, store)
+        assert l1_all_passed(results), l1_failures(results)
 
     def test_recommended_with_speculative_fails(self):
         store = _populated_store()
