@@ -36,6 +36,7 @@ def add_constraint(
     bound_value: Any,
     unit: str,
     tolerance: float | None = None,
+    source_artifact: str | None = None,
 ) -> dict[str, Any]:
     """Create a Constraint entity in the store.
 
@@ -54,6 +55,9 @@ def add_constraint(
         Unit of the constrained quantity.
     tolerance : float, optional
         For equality constraints, the acceptable deviation.
+    source_artifact : str, optional
+        Artifact ID to record as provenance for the created Constraint.
+        When omitted, the Constraint is self-sourced by its own ID.
 
     Returns
     -------
@@ -66,7 +70,7 @@ def add_constraint(
         "type": "Constraint",
         "name": name,
         "source_adapter": "core",
-        "source_artifact": constraint_id,
+        "source_artifact": source_artifact or constraint_id,
         "created_at": now,
         "bound_type": bound_type,
         "bound_value": bound_value,

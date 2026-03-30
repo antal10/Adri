@@ -67,6 +67,19 @@ class TestAddConstraint:
         assert entity["source_artifact"] == "c-002"
         assert entity["created_at"]  # non-empty
 
+    def test_source_artifact_override(self):
+        store = OntologyStore()
+        entity = add_constraint(
+            store,
+            constraint_id="c-002b",
+            name="Max peak freq",
+            bound_type="upper",
+            bound_value=500.0,
+            unit="Hz",
+            source_artifact="artifact-001",
+        )
+        assert entity["source_artifact"] == "artifact-001"
+
     def test_range_bound_value(self):
         store = OntologyStore()
         entity = add_constraint(

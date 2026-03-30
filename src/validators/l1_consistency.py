@@ -46,9 +46,14 @@ def validate_recommendation_consistency(
                 f"Trace ID '{entity_id}' does not exist in ontology store.",
             ))
 
-    # Evidence grounding: every evidence source references a known artifact
-    # or adapter ID
-    known_artifact_ids = {e["id"] for e in store.list_by_type("Artifact")}
+    # Evidence grounding: every evidence source references a known artifact,
+    # another in-store entity (for example a Constraint used in a derivation),
+    # or an adapter ID.
+    from adri.ontology_store import ENTITY_TYPES
+
+    known_entity_ids: set[str] = set()
+    for etype in sorted(ENTITY_TYPES):
+        known_entity_ids.update(e["id"] for e in store.list_by_type(etype))
     known_adapter_ids: set[str] = set()
     for etype in ("Signal", "Component", "Sensor"):  # extend as needed
         for e in store.list_by_type(etype):
@@ -61,13 +66,12 @@ def validate_recommendation_consistency(
     evidence = rec.get("evidence", [])
     for i, ev in enumerate(evidence if isinstance(evidence, list) else []):
         source = ev.get("source", "")
-        # Source must reference an artifact ID or an adapter ID
-        if source in known_artifact_ids or source in known_adapter_ids:
+        if source in known_entity_ids or source in known_adapter_ids:
             results.append(_pass(f"evidence[{i}]_source_grounded"))
         else:
             results.append(_fail(
                 f"evidence[{i}]_source_grounded",
-                f"Evidence[{i}] source '{source}' is not a known artifact or adapter.",
+                f"Evidence[{i}] source '{source}' is not a known entity or adapter.",
             ))
 
     # Verdict-evidence consistency
