@@ -1,4 +1,4 @@
-"""MATLAB vibration adapter — file-in/file-out contract scaffold.
+"""MATLAB vibration adapter - file-in/file-out contract.
 
 Defines the canonical file-based contract for single-channel vibration
 CSV analysis through a MATLAB adapter boundary:
@@ -6,15 +6,18 @@ CSV analysis through a MATLAB adapter boundary:
   Input:  request.json + vibration.csv  (placed by Adri core)
   Output: features.json, raw_output.mat, spectrum.png, run_log.txt
 
-This module currently executes via a **NumPy fallback backend**.
-MATLAB is NOT invoked. The contract shape, file layout, persistence,
-and normalization are fully implemented so that swapping in a real
-MATLAB backend (CLI, Engine API, or compiled Runtime) requires only
-replacing the computation step — the file contract remains identical.
+This module preserves one file contract across two execution backends:
+- MATLAB via ``matlab -batch`` when a CLI is configured
+- NumPy fallback when MATLAB is unavailable
 
 Every response and persisted artifact records which backend produced
 it via the ``backend`` field. Consumers must not assume MATLAB
 execution unless ``backend == "matlab"``.
+
+MATLAB executable resolution order:
+1. ``inputs["matlab_executable"]``
+2. ``ADRI_MATLAB_EXECUTABLE``
+3. ``matlab`` on ``PATH``
 
 Accepted CSV format:
 - Header: time_s,accel_m_s2
@@ -29,6 +32,7 @@ import logging
 import os
 import shutil
 import struct
+import subprocess
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -39,21 +43,28 @@ logger = logging.getLogger(__name__)
 
 # Backend identifier: "matlab" when real MATLAB executes, "numpy_fallback" now.
 BACKEND = "numpy_fallback"
+MATLAB_EXECUTABLE_ENV = "ADRI_MATLAB_EXECUTABLE"
 
 
-def _resolve_backend() -> str:
-    """Return the active backend identifier.
+def _resolve_matlab_executable(configured: str | None = None) -> str | None:
+    """Resolve the MATLAB executable from request, env, or PATH."""
+    candidate = configured or os.getenv(MATLAB_EXECUTABLE_ENV)
+    if candidate:
+        resolved = shutil.which(candidate)
+        if resolved is not None:
+            return resolved
+        if os.path.isfile(candidate):
+            return candidate
+        return None
+    return shutil.which("matlab")
 
-    Returns "matlab" only if MATLAB is on PATH *and* a future code path
-    wires it in. Currently always returns "numpy_fallback".
-    """
-    # TODO(C7b): When real MATLAB invocation is implemented, check
-    # shutil.which("matlab") and return "matlab" if the MATLAB code
-    # path is wired in. For now, always fallback.
-    return BACKEND
+
+def _resolve_backend(configured: str | None = None) -> str:
+    """Return the active backend identifier."""
+    return "matlab" if _resolve_matlab_executable(configured) else BACKEND
 
 
-# --- Registration manifest (adapter contract §1) ---
+# --- Registration manifest (adapter contract section 1) ---
 
 REGISTRATION: dict[str, Any] = {
     "adapter_id": "matlab_vibration",
@@ -65,8 +76,8 @@ REGISTRATION: dict[str, Any] = {
             "operation_id": "analyze_vibration_csv",
             "description": (
                 "Analyze a single-channel vibration CSV via file-based "
-                "contract. Currently backed by NumPy fallback; MATLAB "
-                "backend not yet wired."
+                "contract. Executes via matlab -batch when configured, "
+                "otherwise via the NumPy fallback."
             ),
             "input_schema": {
                 "type": "object",
@@ -75,6 +86,7 @@ REGISTRATION: dict[str, Any] = {
                     "artifact_id": {"type": "string"},
                     "file_path": {"type": "string"},
                     "run_dir": {"type": "string"},
+                    "matlab_executable": {"type": "string"},
                 },
             },
             "output_schema": {
@@ -97,26 +109,31 @@ REGISTRATION: dict[str, Any] = {
 }
 
 
-# --- Health check (adapter contract §8) ---
+# --- Health check (adapter contract section 8) ---
 
 
 def health() -> dict[str, Any]:
-    """Return adapter health status.
-
-    Reports ``tool_reachable=True`` only if MATLAB is found on PATH.
-    ``backend`` always reflects the actual execution backend.
-    """
-    matlab_on_path = shutil.which("matlab") is not None
+    """Return adapter health status."""
+    configured = os.getenv(MATLAB_EXECUTABLE_ENV)
+    matlab_executable = _resolve_matlab_executable()
     backend = _resolve_backend()
     return {
         "adapter_id": REGISTRATION["adapter_id"],
-        "status": "healthy" if matlab_on_path else "degraded",
-        "tool_reachable": matlab_on_path,
+        "status": "healthy" if matlab_executable else "degraded",
+        "tool_reachable": matlab_executable is not None,
         "backend": backend,
         "message": (
-            f"MATLAB found on PATH. Active backend: {backend}."
-            if matlab_on_path
-            else f"MATLAB not on PATH. Active backend: {backend}."
+            f"MATLAB CLI resolved to {matlab_executable}. Active backend: {backend}."
+            if matlab_executable
+            else (
+                f"Configured MATLAB executable not found: {configured}. "
+                f"Active backend: {backend}."
+                if configured
+                else (
+                    f"MATLAB CLI not configured. Set {MATLAB_EXECUTABLE_ENV} "
+                    f"or put matlab on PATH. Active backend: {backend}."
+                )
+            )
         ),
     }
 
@@ -125,33 +142,28 @@ def health() -> dict[str, Any]:
 
 
 def analyze_vibration_csv(request: dict[str, Any]) -> dict[str, Any]:
-    """Execute the file-in/file-out vibration analysis contract.
-
-    Steps:
-    1. Validate request and inputs.
-    2. Set up run directory with request.json and copy of vibration.csv.
-    3. Parse CSV → compute FFT features (NumPy fallback if no MATLAB).
-    4. Write features.json, raw_output.mat, spectrum.png, run_log.txt.
-    5. Return adapter response with entity stubs.
-    """
+    """Execute the file-in/file-out vibration analysis contract."""
     invocation_id = request.get("invocation_id", "")
     operation_id = request.get("operation_id", "")
     inputs = request.get("inputs", {})
     log_lines: list[str] = []
     t0 = time.monotonic()
 
-    def _log(msg: str) -> None:
-        ts = datetime.now(timezone.utc).isoformat()
-        log_lines.append(f"[{ts}] {msg}")
+    def _log(message: str) -> None:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        log_lines.append(f"[{timestamp}] {message}")
 
-    backend = _resolve_backend()
+    requested_matlab = inputs.get("matlab_executable")
+    matlab_executable = _resolve_matlab_executable(requested_matlab)
+    backend = _resolve_backend(requested_matlab)
     _log(f"Invocation {invocation_id} started. Backend: {backend}.")
 
-    # --- Validate operation_id ---
     if operation_id != "analyze_vibration_csv":
         return _error_response(
-            invocation_id, "INVALID_INPUT",
-            f"Unknown operation '{operation_id}'.", False,
+            invocation_id,
+            "INVALID_INPUT",
+            f"Unknown operation '{operation_id}'.",
+            False,
         )
 
     artifact_id = inputs.get("artifact_id")
@@ -160,135 +172,212 @@ def analyze_vibration_csv(request: dict[str, Any]) -> dict[str, Any]:
 
     if not artifact_id or not file_path or not run_dir:
         return _error_response(
-            invocation_id, "INVALID_INPUT",
-            "'artifact_id', 'file_path', and 'run_dir' are required.", False,
+            invocation_id,
+            "INVALID_INPUT",
+            "'artifact_id', 'file_path', and 'run_dir' are required.",
+            False,
         )
 
-    # --- Set up run directory ---
     os.makedirs(run_dir, exist_ok=True)
 
-    # Write request manifest
     request_manifest = {
         "invocation_id": invocation_id,
         "operation_id": operation_id,
         "artifact_id": artifact_id,
         "source_file": file_path,
         "backend": backend,
+        "matlab_executable": matlab_executable,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     _write_json(os.path.join(run_dir, "request.json"), request_manifest)
     _log("Wrote request.json.")
 
-    # Copy source CSV for reproducibility
+    if requested_matlab and matlab_executable is None:
+        _log(f"Configured MATLAB executable not found: {requested_matlab}")
+        _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
+        return _error_response(
+            invocation_id,
+            "TOOL_UNAVAILABLE",
+            f"Configured MATLAB executable not found: {requested_matlab}",
+            False,
+        )
+
     csv_dest = os.path.join(run_dir, "vibration.csv")
     if not os.path.isfile(file_path):
         _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
         return _error_response(
-            invocation_id, "INVALID_ARTIFACT",
-            f"File not found: {file_path}", False,
+            invocation_id,
+            "INVALID_ARTIFACT",
+            f"File not found: {file_path}",
+            False,
         )
     shutil.copy2(file_path, csv_dest)
     _log("Copied source CSV to run directory.")
 
-    # --- Parse CSV ---
-    try:
-        data = np.genfromtxt(csv_dest, delimiter=",", names=True, dtype=float)
-    except Exception as exc:
-        _log(f"CSV parse error: {exc}")
-        _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
-        return _error_response(
-            invocation_id, "INVALID_ARTIFACT",
-            f"Failed to parse CSV: {exc}", False,
-        )
-
-    if data.dtype.names is None or not (
-        {"time_s", "accel_m_s2"} <= set(data.dtype.names)
-    ):
-        _log("CSV missing required columns: time_s, accel_m_s2.")
-        _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
-        return _error_response(
-            invocation_id, "INVALID_ARTIFACT",
-            "CSV must have header 'time_s,accel_m_s2'.", False,
-        )
-
-    time_s = data["time_s"]
-    accel = data["accel_m_s2"]
-    num_samples = len(time_s)
-
-    if num_samples < 2:
-        _log("CSV has fewer than 2 data rows.")
-        _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
-        return _error_response(
-            invocation_id, "INVALID_ARTIFACT",
-            "CSV must have at least 2 data rows.", False,
-        )
-
-    _log(f"Parsed {num_samples} samples.")
-
-    # --- Compute features ---
-    dt = np.median(np.diff(time_s))
-    sample_rate = 1.0 / dt
-    duration_s = float(time_s[-1] - time_s[0]) + dt
-    rms = float(np.sqrt(np.mean(accel ** 2)))
-
-    # FFT
-    n = len(accel)
-    fft_vals = np.fft.rfft(accel)
-    fft_mag = (2.0 / n) * np.abs(fft_vals)
-    freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate)
-    fft_mag[0] = 0.0  # skip DC
-    freq_resolution = float(sample_rate / n)
-
-    # Peak detection (same logic as python_vibration)
-    peaks_hz, peaks_mag = _find_spectral_peaks(freqs, fft_mag)
-
-    features = {
-        "sample_rate_hz": float(sample_rate),
-        "duration_s": float(duration_s),
-        "rms": rms,
-        "dominant_peak_frequencies_hz": peaks_hz,
-        "dominant_peak_magnitudes": peaks_mag,
-        "frequency_resolution_hz": freq_resolution,
-        "backend": backend,
-    }
-
-    _log(f"Computed features: {len(peaks_hz)} peaks, RMS={rms:.6f}.")
-
-    # --- Write output artifacts ---
     artifacts_written: list[str] = ["request.json", "vibration.csv"]
 
-    # features.json
-    _write_json(os.path.join(run_dir, "features.json"), features)
-    artifacts_written.append("features.json")
-    _log("Wrote features.json.")
+    if backend == "matlab":
+        script_path = os.path.join(os.path.dirname(__file__), "run_analysis.m")
+        batch_command = _build_matlab_batch_command(run_dir, script_path)
+        _log(f"Running MATLAB batch command: {batch_command}")
 
-    # raw_output.mat (minimal Level 5 MAT-file with accel + freqs + fft_mag)
-    _write_minimal_mat(
-        os.path.join(run_dir, "raw_output.mat"),
-        {"accel": accel, "freqs": freqs, "fft_mag": fft_mag},
-        backend=backend,
-    )
-    artifacts_written.append("raw_output.mat")
-    _log(f"Wrote raw_output.mat (produced by {backend}).")
+        try:
+            _run_matlab_batch(
+                matlab_executable=matlab_executable,
+                batch_command=batch_command,
+                cwd=run_dir,
+            )
+        except subprocess.CalledProcessError as exc:
+            _log(f"MATLAB execution failed: {exc}")
+            if exc.stdout:
+                _log(f"MATLAB stdout: {exc.stdout.strip()}")
+            if exc.stderr:
+                _log(f"MATLAB stderr: {exc.stderr.strip()}")
+            if not os.path.isfile(os.path.join(run_dir, "run_log.txt")):
+                _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
+            return _error_response(
+                invocation_id,
+                "INTERNAL",
+                "MATLAB execution failed.",
+                False,
+            )
 
-    # spectrum.png
-    try:
-        _write_spectrum_png(
-            os.path.join(run_dir, "spectrum.png"),
-            freqs, fft_mag, peaks_hz,
+        required_outputs = (
+            "features.json",
+            "raw_output.mat",
+            "spectrum.png",
+            "run_log.txt",
         )
-        artifacts_written.append("spectrum.png")
-        _log("Wrote spectrum.png.")
-    except Exception as exc:
-        _log(f"spectrum.png skipped (headless export failed): {exc}")
+        missing_outputs = [
+            name
+            for name in required_outputs
+            if not os.path.isfile(os.path.join(run_dir, name))
+        ]
+        if missing_outputs:
+            _log(f"MATLAB run missing outputs: {missing_outputs}")
+            if not os.path.isfile(os.path.join(run_dir, "run_log.txt")):
+                _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
+            return _error_response(
+                invocation_id,
+                "INTERNAL",
+                f"MATLAB run did not produce required outputs: {missing_outputs}",
+                False,
+            )
 
-    # run_log.txt
-    elapsed = time.monotonic() - t0
-    _log(f"Invocation completed in {elapsed:.3f}s.")
-    _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
-    artifacts_written.append("run_log.txt")
+        with open(os.path.join(run_dir, "features.json")) as file_obj:
+            features = json.load(file_obj)
+        for key in (
+            "dominant_peak_frequencies_hz",
+            "dominant_peak_magnitudes",
+        ):
+            value = features.get(key, [])
+            if isinstance(value, list):
+                continue
+            if value is None:
+                features[key] = []
+            else:
+                features[key] = [float(value)]
+        features["backend"] = backend
+        _write_json(os.path.join(run_dir, "features.json"), features)
+        artifacts_written.extend(required_outputs)
+        sample_rate = float(features["sample_rate_hz"])
+        _log("Read features.json from MATLAB output.")
+    else:
+        try:
+            data = np.genfromtxt(csv_dest, delimiter=",", names=True, dtype=float)
+        except Exception as exc:
+            _log(f"CSV parse error: {exc}")
+            _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
+            return _error_response(
+                invocation_id,
+                "INVALID_ARTIFACT",
+                f"Failed to parse CSV: {exc}",
+                False,
+            )
 
-    # --- Build Signal entity stub ---
+        if data.dtype.names is None or not (
+            {"time_s", "accel_m_s2"} <= set(data.dtype.names)
+        ):
+            _log("CSV missing required columns: time_s, accel_m_s2.")
+            _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
+            return _error_response(
+                invocation_id,
+                "INVALID_ARTIFACT",
+                "CSV must have header 'time_s,accel_m_s2'.",
+                False,
+            )
+
+        time_s = data["time_s"]
+        accel = data["accel_m_s2"]
+        num_samples = len(time_s)
+
+        if num_samples < 2:
+            _log("CSV has fewer than 2 data rows.")
+            _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
+            return _error_response(
+                invocation_id,
+                "INVALID_ARTIFACT",
+                "CSV must have at least 2 data rows.",
+                False,
+            )
+
+        _log(f"Parsed {num_samples} samples.")
+
+        dt = np.median(np.diff(time_s))
+        sample_rate = 1.0 / dt
+        duration_s = float(time_s[-1] - time_s[0]) + dt
+        rms = float(np.sqrt(np.mean(accel ** 2)))
+
+        n = len(accel)
+        fft_vals = np.fft.rfft(accel)
+        fft_mag = (2.0 / n) * np.abs(fft_vals)
+        freqs = np.fft.rfftfreq(n, d=1.0 / sample_rate)
+        fft_mag[0] = 0.0
+        freq_resolution = float(sample_rate / n)
+
+        peaks_hz, peaks_mag = _find_spectral_peaks(freqs, fft_mag)
+
+        features = {
+            "sample_rate_hz": float(sample_rate),
+            "duration_s": float(duration_s),
+            "rms": rms,
+            "dominant_peak_frequencies_hz": peaks_hz,
+            "dominant_peak_magnitudes": peaks_mag,
+            "frequency_resolution_hz": freq_resolution,
+            "backend": backend,
+        }
+
+        _log(f"Computed features: {len(peaks_hz)} peaks, RMS={rms:.6f}.")
+
+        _write_json(os.path.join(run_dir, "features.json"), features)
+        artifacts_written.append("features.json")
+        _log("Wrote features.json.")
+
+        _write_minimal_mat(
+            os.path.join(run_dir, "raw_output.mat"),
+            {"accel": accel, "freqs": freqs, "fft_mag": fft_mag},
+            backend=backend,
+        )
+        artifacts_written.append("raw_output.mat")
+        _log(f"Wrote raw_output.mat (produced by {backend}).")
+
+        try:
+            _write_spectrum_png(
+                os.path.join(run_dir, "spectrum.png"),
+                freqs,
+                fft_mag,
+                peaks_hz,
+            )
+            artifacts_written.append("spectrum.png")
+            _log("Wrote spectrum.png.")
+        except Exception as exc:
+            _log(f"spectrum.png skipped (headless export failed): {exc}")
+
+        elapsed = time.monotonic() - t0
+        _log(f"Invocation completed in {elapsed:.3f}s.")
+        _write_log(os.path.join(run_dir, "run_log.txt"), log_lines)
+        artifacts_written.append("run_log.txt")
+
     now = datetime.now(timezone.utc).isoformat()
     signal_entity = {
         "id": f"signal-matlab-{artifact_id}",
@@ -300,7 +389,7 @@ def analyze_vibration_csv(request: dict[str, Any]) -> dict[str, Any]:
         "domain": "time",
         "sample_rate": float(sample_rate),
         "bandwidth": float(sample_rate / 2.0),
-        "unit": "m/s²",
+        "unit": "m/s^2",
     }
 
     return {
@@ -345,77 +434,100 @@ def _find_spectral_peaks(
     return peaks_hz, peaks_amp
 
 
+def _matlab_literal(path: str) -> str:
+    """Return a MATLAB-safe single-quoted path literal."""
+    return path.replace("\\", "/").replace("'", "''")
+
+
+def _build_matlab_batch_command(run_dir: str, script_path: str) -> str:
+    """Build the deterministic MATLAB -batch command."""
+    script_dir = os.path.dirname(script_path)
+    script_name = os.path.splitext(os.path.basename(script_path))[0]
+    return (
+        f"addpath('{_matlab_literal(script_dir)}'); "
+        f"cd('{_matlab_literal(run_dir)}'); "
+        f"{script_name};"
+    )
+
+
+def _run_matlab_batch(
+    matlab_executable: str | None,
+    batch_command: str,
+    cwd: str,
+) -> subprocess.CompletedProcess[str]:
+    """Execute the MATLAB CLI for one batch run."""
+    if matlab_executable is None:
+        raise FileNotFoundError("MATLAB executable was not resolved.")
+    return subprocess.run(
+        [matlab_executable, "-batch", batch_command],
+        cwd=cwd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 def _write_json(path: str, data: Any) -> None:
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2, default=str)
+    with open(path, "w") as file_obj:
+        json.dump(data, file_obj, indent=2, default=str)
 
 
 def _write_log(path: str, lines: list[str]) -> None:
-    with open(path, "w") as f:
-        f.write("\n".join(lines) + "\n")
+    with open(path, "w") as file_obj:
+        file_obj.write("\n".join(lines) + "\n")
 
 
 def _write_minimal_mat(
-    path: str, arrays: dict[str, np.ndarray], backend: str = "numpy_fallback",
+    path: str,
+    arrays: dict[str, np.ndarray],
+    backend: str = "numpy_fallback",
 ) -> None:
-    """Write a minimal MATLAB Level 5 MAT-file.
-
-    Produces a valid .mat header + miMATRIX elements for each array.
-    This avoids a scipy dependency while producing a file MATLAB can
-    read via ``load('raw_output.mat')``. The header text records which
-    backend produced the file.
-    """
-    header_text = f"MATLAB 5.0 MAT-file, Adri matlab_vibration adapter, backend={backend}"
+    """Write a minimal MATLAB Level 5 MAT-file."""
+    header_text = (
+        "MATLAB 5.0 MAT-file, Adri matlab_vibration adapter, "
+        f"backend={backend}"
+    )
     header = header_text.encode("ascii")
-    header = header + b" " * (116 - len(header))  # pad to 116 bytes
-    header += b"\x00" * 8  # subsystem data offset (unused)
-    header += b"\x00\x01"  # version 0x0100
-    header += b"IM"  # endian indicator
+    header = header + b" " * (116 - len(header))
+    header += b"\x00" * 8
+    header += b"\x00\x01"
+    header += b"IM"
 
     elements = b""
     for name, arr in arrays.items():
         elements += _mat_matrix_element(name, np.asarray(arr, dtype=np.float64))
 
-    with open(path, "wb") as f:
-        f.write(header + elements)
+    with open(path, "wb") as file_obj:
+        file_obj.write(header + elements)
 
 
 def _mat_matrix_element(name: str, arr: np.ndarray) -> bytes:
     """Encode one numeric array as a miMATRIX element."""
-    # miMATRIX tag (type=14) — length filled after building payload
-    MI_MATRIX = 14
-    MI_UINT32 = 5
-    MI_INT32 = 5
-    MI_DOUBLE = 9
-    MI_INT8 = 1
+    mi_matrix = 14
+    mi_uint32 = 5
+    mi_int32 = 5
+    mi_double = 9
+    mi_int8 = 1
+    mx_double_class = 6
 
-    # Subelement 1: Array flags (miUINT32, 8 bytes)
-    # class = mxDOUBLE_CLASS (6), non-complex, non-global, non-logical
-    mxDOUBLE_CLASS = 6
-    flags_bytes = struct.pack("<II", mxDOUBLE_CLASS, 0)
-    flags_sub = struct.pack("<II", MI_UINT32, 8) + flags_bytes
+    flags_bytes = struct.pack("<II", mx_double_class, 0)
+    flags_sub = struct.pack("<II", mi_uint32, 8) + flags_bytes
 
-    # Subelement 2: Dimensions (miINT32)
     if arr.ndim == 1:
         dims = (1, arr.shape[0])
     else:
         dims = arr.shape
     dims_data = struct.pack(f"<{len(dims)}i", *dims)
-    dims_pad = _pad8(dims_data)
-    dims_sub = struct.pack("<II", MI_INT32, len(dims_data)) + dims_pad
+    dims_sub = struct.pack("<II", mi_int32, len(dims_data)) + _pad8(dims_data)
 
-    # Subelement 3: Array name (miINT8)
     name_data = name.encode("ascii")
-    name_pad = _pad8(name_data)
-    name_sub = struct.pack("<II", MI_INT8, len(name_data)) + name_pad
+    name_sub = struct.pack("<II", mi_int8, len(name_data)) + _pad8(name_data)
 
-    # Subelement 4: Real part (miDOUBLE)
     pr_data = arr.astype(np.float64).tobytes()
-    pr_pad = _pad8(pr_data)
-    pr_sub = struct.pack("<II", MI_DOUBLE, len(pr_data)) + pr_pad
+    pr_sub = struct.pack("<II", mi_double, len(pr_data)) + _pad8(pr_data)
 
     payload = flags_sub + dims_sub + name_sub + pr_sub
-    tag = struct.pack("<II", MI_MATRIX, len(payload))
+    tag = struct.pack("<II", mi_matrix, len(payload))
     return tag + payload
 
 
@@ -435,21 +547,25 @@ def _write_spectrum_png(
 ) -> None:
     """Write a minimal spectrum PNG using matplotlib if available."""
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(freqs, fft_mag, linewidth=0.8)
     if peaks_hz:
-        peak_indices = [int(np.argmin(np.abs(freqs - f))) for f in peaks_hz]
+        peak_indices = [int(np.argmin(np.abs(freqs - frequency))) for frequency in peaks_hz]
         ax.plot(
-            freqs[peak_indices], fft_mag[peak_indices],
-            "rv", markersize=6, label="peaks",
+            freqs[peak_indices],
+            fft_mag[peak_indices],
+            "rv",
+            markersize=6,
+            label="peaks",
         )
         ax.legend()
     ax.set_xlabel("Frequency (Hz)")
     ax.set_ylabel("Magnitude")
-    ax.set_title("FFT Spectrum — single-channel vibration")
+    ax.set_title("FFT Spectrum - single-channel vibration")
     fig.tight_layout()
     fig.savefig(path, dpi=100)
     plt.close(fig)
