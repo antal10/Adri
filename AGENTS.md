@@ -80,7 +80,7 @@ docs/
   04_validation/
     evaluation_strategy.md         — correctness criteria for Adri outputs
   05_governance/
-    decision_log.md                — append-only architectural decision record (DEC-001 – DEC-018)
+    decision_log.md                — append-only architectural decision record (DEC-001 – DEC-019)
   06_operations/
     operating_doctrine.md          — process infrastructure, gates, role model
     packet_template.md             — work packet proposal format
@@ -91,7 +91,8 @@ src/
     python_vibration/
       adapter.py                   — vibration CSV ingest + FFT peak detection
     matlab_vibration/
-      adapter.py                   — MATLAB contract scaffold (NumPy fallback backend)
+      adapter.py                   — MATLAB vibration adapter (matlab -batch when configured, NumPy fallback)
+      run_analysis.m               — MATLAB-side FFT analysis script invoked by adapter
       normalize.py                 — normalize adapter outputs into ontology
   validators/
     l0_schema.py                   — L0 schema conformance checks
@@ -102,7 +103,7 @@ src/
 tests/
   test_ontology_store.py           — ontology store unit tests
   test_python_vibration_adapter.py — Python adapter unit tests
-  test_matlab_vibration_adapter.py — MATLAB contract scaffold + normalization tests
+  test_matlab_vibration_adapter.py — MATLAB adapter tests (contract, fallback, real MATLAB integration)
   test_validators.py               — L0/L1 validator unit tests
   test_reasoning.py                — reasoning stub unit tests
   test_run_loop.py                 — orchestrator unit tests
@@ -169,6 +170,6 @@ When a question or task is ambiguous:
 4. Check the ontology before proposing new entities or relationships.
 5. Check the use-case catalogue to ground your work in concrete scenarios.
 6. Check the decision log (`docs/05_governance/decision_log.md`) to ensure
-   your proposal does not contradict an existing decision (DEC-001–DEC-018).
+   your proposal does not contradict an existing decision (DEC-001–DEC-019).
 7. Produce output that follows existing document conventions (Markdown, same
    heading hierarchy, same vocabulary).
