@@ -172,3 +172,12 @@ reversed, add a new entry that supersedes the old one.
 | **Rationale** | DEC-015's relationship design is correct but its language implied MATLAB execution. The relationship type choice (`references` over `derived_from` for Artifact→Artifact links) is backend-independent and does not need to change. Only the framing needed correction. |
 | **Principle** | 4 (Evidence over opinion) |
 | **Supersedes** | Corrects framing of DEC-015 (output artifacts are backend-produced, not necessarily MATLAB-produced). |
+
+### DEC-018
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-24 |
+| **Decision** | Adopted `docs/06_operations/operating_doctrine.md` as additive process infrastructure. It codifies product doctrine, role model, gate list, unattended task boundaries, and phase/tier mapping. No architecture, ontology, or code changes. |
+| **Rationale** | Existing practice around gates (L0/L1 validators, test suite, PR review) and role boundaries (human merges, agents build) was implicit. Formalizing it reduces ambiguity for unattended task execution and cross-model audit loops without altering any technical decision. |
+| **Principle** | 4 (Evidence over opinion) |
+| **Supersedes** | — |

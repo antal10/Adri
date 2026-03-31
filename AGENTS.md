@@ -5,12 +5,58 @@ working inside the Adri repository.
 
 ## What this repo is
 
-Adri is an Engineering Operating System — a personal engineering assistant that
-ingests engineering artifacts, reasons across domains, invokes real tools through
-adapters, and produces evidence-backed recommendations.
+Adri is a personal engineering operating system — a native desktop application
+that acts as the central nucleus connecting world-class tools through clean
+adapters. Each tool does only what it is world-class at. Adri is the glue, not
+the engine.
 
 This is NOT a chatbot, NOT a CAD/simulation/DAQ tool, and NOT a software-only
 project. Adri orchestrates engineering tools; it does not replace them.
+
+### Tool ownership boundaries
+
+World-class tools for world-class use cases only:
+
+| Tool | Owns | Does NOT do |
+|------|------|-------------|
+| **SOLIDWORKS** | Geometry, assemblies, BOM | Signal math, DAQ |
+| **MATLAB** | All signals and systems analysis — FFT, Butterworth filtering, modal analysis, frequency response, peak detection | Data plumbing, geometry |
+| **LabVIEW** | Real-time DAQ, instrumentation, sensor streaming | Signal analysis, geometry |
+| **Python** | Lightweight data pipeline only — ingest, resample, format, export | Signal math (no FFT, no Butterworth, no peak detection) |
+| **FL Studio** | Acoustics, audio signal processing | Structural analysis |
+| **LM Studio** | Local AI inference | Replacing engineering judgment |
+
+**The signal chain:** LabVIEW captures raw DAQ stream → writes file → Python
+ingests, resamples, formats, exports clean file → MATLAB reads it and does all
+signal analysis.
+
+### Three operational phases
+
+| Phase | What happens |
+|-------|-------------|
+| **Phase 1 — Design** | Ingest CAD artifact, call MATLAB to analyze at design time, iterate. Ontology captures predicted behavior. |
+| **Phase 2 — Physical** | Artifact gets built. LabVIEW instruments it. Ontology already knows what the artifact is from Phase 1. |
+| **Phase 3 — Live** | MATLAB processes live LabVIEW stream in chunks at full accuracy. Adri flags anomalies against Phase 1 predictions. |
+
+### The nucleus comes first
+
+The nucleus must be bulletproof before reasoning is added. Reasoning — whether a
+cheap LLM call or a custom engine — is only viable on top of a working nucleus.
+The nucleus is: adapters plug in, outputs are ingested, ontology is populated,
+everything is visible in one clean window.
+
+### GUI
+
+The GUI is a native desktop window. It is deferred but always the intended end
+state. The engineer sees all tool outputs in one place, organized cleanly. The
+engineer remains the decision-maker.
+
+### Demo artifact
+
+A dummy demo exists showing a suspension corner (wheel, shock, control arms,
+road bump) being analyzed across all four tools simultaneously. This is a vision
+communication artifact, not a prototype. Do not confuse it with the core
+system's implementation.
 
 ## Repo layout
 
@@ -34,7 +80,10 @@ docs/
   04_validation/
     evaluation_strategy.md         — correctness criteria for Adri outputs
   05_governance/
-    decision_log.md                — append-only architectural decision record
+    decision_log.md                — append-only architectural decision record (DEC-001 – DEC-018)
+  06_operations/
+    operating_doctrine.md          — process infrastructure, gates, role model
+    packet_template.md             — work packet proposal format
 src/
   adri/
     ontology_store.py              — in-memory entity/relationship store (DEC-010)
@@ -68,10 +117,11 @@ Use these terms precisely. Do not invent synonyms.
 |------------------|---------|
 | **Adapter**      | Interface between Adri's core and an external tool. |
 | **Artifact**     | Any engineering object Adri can ingest (CAD file, signal dataset, schematic, etc.). |
-| **Ontology**     | The shared schema that lets Adri reason across domains. |
 | **Constraint**   | A named design constraint with a bound, unit, and type — a first-class ontology entity. |
-| **Tool contract**| The API/interface an adapter must satisfy. |
+| **Nucleus**      | The working foundation — adapters plug in, outputs are ingested, ontology is populated, everything is visible. Must be bulletproof before reasoning is added. |
+| **Ontology**     | The shared schema that lets Adri reason across domains. |
 | **Signal**       | A first-class entity with spectrum, noise model, and transfer function. |
+| **Tool contract**| The API/interface an adapter must satisfy. |
 | **Recommendation** | A structured output that includes evidence, assumptions, risks, and confidence. |
 
 ## Constraints for agents
@@ -92,7 +142,13 @@ Use these terms precisely. Do not invent synonyms.
    controls, and software domains. Do not assume a software-only context.
 7. **Adapter boundary.** Never propose that Adri's core directly call an
    external tool. All tool interaction goes through an adapter.
-8. **Conciseness.** Keep outputs rigorous and concise. No filler paragraphs.
+8. **Tool ownership.** Respect the tool ownership table above. Never propose
+   that Python do signal math (FFT, filtering, peak detection). Those belong
+   to MATLAB. Python is the data janitor: ingest, resample, format, export.
+9. **Nucleus first.** Do not propose reasoning features that depend on a
+   nucleus that does not yet work. The foundation must be solid before
+   reasoning is layered on top.
+10. **Conciseness.** Keep outputs rigorous and concise. No filler paragraphs.
 
 ## Handling ambiguity
 
@@ -112,5 +168,7 @@ When a question or task is ambiguous:
 3. Read the relevant `docs/` files for the domain of the task.
 4. Check the ontology before proposing new entities or relationships.
 5. Check the use-case catalogue to ground your work in concrete scenarios.
-6. Produce output that follows existing document conventions (Markdown, same
+6. Check the decision log (`docs/05_governance/decision_log.md`) to ensure
+   your proposal does not contradict an existing decision (DEC-001–DEC-018).
+7. Produce output that follows existing document conventions (Markdown, same
    heading hierarchy, same vocabulary).
