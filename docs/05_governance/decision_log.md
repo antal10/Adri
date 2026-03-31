@@ -181,3 +181,12 @@ reversed, add a new entry that supersedes the old one.
 | **Rationale** | Existing practice around gates (L0/L1 validators, test suite, PR review) and role boundaries (human merges, agents build) was implicit. Formalizing it reduces ambiguity for unattended task execution and cross-model audit loops without altering any technical decision. |
 | **Principle** | 4 (Evidence over opinion) |
 | **Supersedes** | — |
+
+### DEC-019
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-03-31 |
+| **Decision** | The MATLAB vibration adapter executes real MATLAB via `matlab -batch` when a MATLAB CLI is configured through request input, `ADRI_MATLAB_EXECUTABLE`, or `PATH`, and otherwise falls back to the NumPy backend. The `backend` field in outputs and persisted artifacts records which engine produced the result. |
+| **Rationale** | DEC-016 established the contract scaffold and backend labeling but did not invoke MATLAB. PR #3 validated the live MATLAB path end-to-end while preserving the DEC-013 file-in/file-out contract and degraded-mode operation on machines without MATLAB. |
+| **Principle** | 2 (Adapter-first architecture), 4 (Evidence over opinion), 6 (Tool-agnostic core) |
+| **Supersedes** | Updates DEC-016 (backend is now conditional, not always `numpy_fallback`). |
