@@ -86,7 +86,7 @@ A dummy demo exists showing a suspension corner (wheel, shock, control arms, roa
 |-----------|----------|---------|
 | Ontology store | `src/adri/ontology_store.py` | In-memory entity/relationship store (DEC-010) |
 | Python vibration adapter | `src/adapters/python_vibration/` | Ingest single-channel vibration CSV, compute FFT peaks |
-| MATLAB vibration adapter | `src/adapters/matlab_vibration/` | File-in/file-out contract scaffold (NumPy fallback backend; MATLAB backend not yet wired) |
+| MATLAB vibration adapter | `src/adapters/matlab_vibration/` | File-in/file-out contract with `matlab -batch` execution when configured, plus NumPy fallback |
 | L0 validator | `src/validators/l0_schema.py` | Schema conformance for entities, adapter responses, recommendations |
 | L1 validator | `src/validators/l1_consistency.py` | Cross-reference consistency (trace, provenance, compliance) |
 | Vibration reasoning stub | `src/reasoning/vibration_stub.py` | Deterministic rule-based recommendation from FFT peaks |

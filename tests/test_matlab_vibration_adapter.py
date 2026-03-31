@@ -22,6 +22,7 @@ import json
 import os
 import shutil
 from datetime import datetime, timezone
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -29,6 +30,7 @@ import pytest
 from adapters.matlab_vibration.adapter import (
     BACKEND,
     REGISTRATION,
+    _build_matlab_batch_command,
     analyze_vibration_csv,
     health,
     _resolve_backend,
@@ -65,6 +67,19 @@ requires_matlab = pytest.mark.skipif(
 # =========================================================================
 # Fixtures
 # =========================================================================
+
+
+@pytest.fixture(autouse=True)
+def force_fallback_backend(request):
+    """Default tests to the NumPy fallback unless they opt into autodetect."""
+    if "TestRealMatlabIntegration" in request.node.nodeid:
+        yield
+        return
+    with mock.patch(
+        "adapters.matlab_vibration.adapter.shutil.which",
+        return_value=None,
+    ):
+        yield
 
 
 def _write_three_tone_csv(path: str) -> None:
@@ -390,6 +405,94 @@ class TestBackendLabeling:
         assert h["backend"] == "numpy_fallback"
 
 
+class TestLiveMatlabBackend:
+    """Mock the live MATLAB path without requiring MATLAB to be installed."""
+
+    def test_resolve_backend_returns_matlab_when_tool_found(self):
+        with mock.patch(
+            "adapters.matlab_vibration.adapter.shutil.which",
+            return_value="C:/MATLAB/bin/matlab.exe",
+        ):
+            assert _resolve_backend() == "matlab"
+
+    def test_health_reports_matlab_when_tool_found(self):
+        with mock.patch(
+            "adapters.matlab_vibration.adapter.shutil.which",
+            return_value="C:/MATLAB/bin/matlab.exe",
+        ):
+            h = health()
+        assert h["tool_reachable"] is True
+        assert h["backend"] == "matlab"
+        assert h["status"] == "healthy"
+
+    def test_analyze_invokes_matlab_and_reads_outputs(self, three_tone_csv, run_dir):
+        def _fake_matlab_run(cmd, cwd, check, capture_output, text):
+            script_path = os.path.abspath(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "src",
+                    "adapters",
+                    "matlab_vibration",
+                    "run_analysis.m",
+                )
+            )
+            expected_command = _build_matlab_batch_command(run_dir, script_path)
+            assert cmd == [
+                "C:/MATLAB/bin/matlab.exe",
+                "-batch",
+                expected_command,
+            ]
+            assert cwd == run_dir
+            with open(os.path.join(cwd, "features.json"), "w") as f:
+                json.dump({
+                    "sample_rate_hz": 1000.0,
+                    "duration_s": 1.0,
+                    "rms": 0.85,
+                    "dominant_peak_frequencies_hz": [80.0, 200.0, 450.0],
+                    "dominant_peak_magnitudes": [1.0, 0.6, 0.3],
+                    "frequency_resolution_hz": 1.0,
+                    "backend": "matlab",
+                }, f)
+            with open(os.path.join(cwd, "raw_output.mat"), "wb") as f:
+                f.write(b"MATLAB 5.0 MAT-file mock")
+            with open(os.path.join(cwd, "spectrum.png"), "wb") as f:
+                f.write(b"\x89PNG\r\n\x1a\n")
+            with open(os.path.join(cwd, "run_log.txt"), "w") as f:
+                f.write("MATLAB mock run completed.\n")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        req["inputs"]["matlab_executable"] = "C:/MATLAB/bin/matlab.exe"
+        with mock.patch(
+            "adapters.matlab_vibration.adapter.shutil.which",
+            return_value="C:/MATLAB/bin/matlab.exe",
+        ), mock.patch(
+            "adapters.matlab_vibration.adapter.subprocess.run",
+            side_effect=_fake_matlab_run,
+        ) as run_mock:
+            resp = analyze_vibration_csv(req)
+
+        assert resp["status"] == "success"
+        assert resp["outputs"]["backend"] == "matlab"
+        for filename in ("features.json", "raw_output.mat", "spectrum.png", "run_log.txt"):
+            assert filename in resp["outputs"]["artifacts_written"]
+            assert os.path.isfile(os.path.join(run_dir, filename))
+        run_mock.assert_called_once()
+
+    def test_invalid_configured_matlab_executable_returns_tool_unavailable(
+        self, three_tone_csv, run_dir
+    ):
+        req = _make_request("art-001", three_tone_csv, run_dir)
+        req["inputs"]["matlab_executable"] = "C:/missing/matlab.exe"
+
+        resp = analyze_vibration_csv(req)
+
+        assert resp["status"] == "error"
+        assert resp["error"]["code"] == "TOOL_UNAVAILABLE"
+        assert os.path.isfile(os.path.join(run_dir, "request.json"))
+
+
 # =========================================================================
 # Fallback-specific numerical tests
 # =========================================================================
@@ -635,15 +738,17 @@ class TestE2EFallback:
 class TestRealMatlabIntegration:
     """These tests validate actual MATLAB execution.
 
-    They are skipped entirely when MATLAB is not on PATH. They exist as
-    placeholders for C7b, which will wire the real MATLAB backend.
+    They are skipped entirely when MATLAB is not on PATH.
     """
 
     def test_health_tool_reachable(self):
         h = health()
         assert h["tool_reachable"] is True
 
-    def test_placeholder_for_matlab_backend(self):
-        # C7b: when the real MATLAB backend is wired, this test will
-        # invoke analyze_vibration_csv and assert backend == "matlab".
-        pytest.skip("Real MATLAB backend not yet implemented (C7b).")
+    def test_real_backend_executes(self, three_tone_csv, run_dir):
+        req = _make_request("art-real", three_tone_csv, run_dir)
+        resp = analyze_vibration_csv(req)
+        assert resp["status"] == "success", resp.get("error")
+        assert resp["outputs"]["backend"] == "matlab"
+        for filename in ("features.json", "raw_output.mat", "spectrum.png", "run_log.txt"):
+            assert os.path.isfile(os.path.join(run_dir, filename))
